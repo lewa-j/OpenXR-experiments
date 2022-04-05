@@ -284,6 +284,14 @@ int main(int carc, const char** argv)
 			printf("  0x%llX\n", f);
 		}
 		swapchainFormat = swapchainFormats[0];
+		for (int i = 0; i < swapchainFormats.size(); i++)
+		{
+			if (swapchainFormats[i] == GL_SRGB8_ALPHA8)
+			{
+				swapchainFormat = swapchainFormats[i];
+				break;
+			}
+		}
 	}
 
 	XrSwapchain swapchains[2]{};
@@ -355,13 +363,19 @@ int main(int carc, const char** argv)
 	r = xrCreateAction(actionSet, &actionInfo, &handAction);
 	CheckXrResult(r,"xrCreateAction");
 
+	XrPath khrControllerPath;
 	XrPath viveControllerPath;
+	xrStringToPath(instance, "/interaction_profiles/khr/simple_controller", &khrControllerPath);
 	xrStringToPath(instance, "/interaction_profiles/htc/vive_controller", &viveControllerPath);
 	std::vector<XrActionSuggestedBinding> bindings{ {{handAction, gripPaths[0]},
 													{handAction, gripPaths[1]}} };
 	XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING, nullptr, viveControllerPath, (uint32_t)bindings.size(), bindings.data()};
 	r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-	CheckXrResult(r,"xrSuggestInteractionProfileBindings");
+	CheckXrResult(r,"xrSuggestInteractionProfileBindings vive");
+
+	suggestedBindings.interactionProfile = khrControllerPath;
+	r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
+	CheckXrResult(r, "xrSuggestInteractionProfileBindings khr");
 
 	XrSpace gripSpaces[2]{};
 	XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO,nullptr,handAction,handsPaths[0],{{0,0,0,1},{0,0,0}} };
