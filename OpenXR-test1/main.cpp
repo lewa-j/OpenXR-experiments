@@ -431,6 +431,8 @@ int main(int carc, const char** argv)
 	XrEventDataBuffer event { XR_TYPE_EVENT_DATA_BUFFER, nullptr };
 	bool shouldClose = false;
 	while(!shouldClose){
+		event.type = XR_TYPE_EVENT_DATA_BUFFER;
+		event.next = nullptr;
 		r = xrPollEvent(instance, &event);
 		if (r == XR_SUCCESS) {
 			char buffer[XR_MAX_STRUCTURE_NAME_SIZE] = "";
