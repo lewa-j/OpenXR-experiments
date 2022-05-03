@@ -6,10 +6,15 @@
 //#define XR_NO_PROTOTYPES 1
 #include "openxr/openxr.h"
 //#define XR_USE_GRAPHICS_API_VULKAN 1
+#define XR_USE_GRAPHICS_API_D3D11 1
 #define XR_USE_GRAPHICS_API_OPENGL 1
 #define XR_USE_PLATFORM_WIN32 1
 #include <Windows.h>
+#include <d3d11.h>
 #include "openxr/openxr_platform.h"
+
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3d11.lib")
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -35,6 +40,7 @@ PFN_xrPollEvent xrPollEvent;
 PFN_xrCreateDebugUtilsMessengerEXT xrCreateDebugUtilsMessengerEXTd;
 PFN_xrDestroyDebugUtilsMessengerEXT xrDestroyDebugUtilsMessengerEXTd;
 PFN_xrGetOpenGLGraphicsRequirementsKHR xrGetOpenGLGraphicsRequirementsKHRd;
+PFN_xrGetD3D11GraphicsRequirementsKHR xrGetD3D11GraphicsRequirementsKHRd;
 
 const char* ViewConfigTypeToStr(XrViewConfigurationType t)
 {
@@ -101,8 +107,49 @@ void CheckXrResult(XrResult r, const char *func)
 	}
 }
 
+static IDXGIAdapter1 *d3d_get_adapter(LUID &adapter_luid)
+{
+	// Turn the LUID into a specific graphics device adapter
+	IDXGIAdapter1 *final_adapter = nullptr;
+	IDXGIAdapter1 *curr_adapter = nullptr;
+	IDXGIFactory1 *dxgi_factory;
+	DXGI_ADAPTER_DESC1 adapter_desc;
+
+	CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)(&dxgi_factory));
+
+	int curr = 0;
+	while (dxgi_factory->EnumAdapters1(curr++, &curr_adapter) == S_OK) {
+		curr_adapter->GetDesc1(&adapter_desc);
+
+		if (memcmp(&adapter_desc.AdapterLuid, &adapter_luid, sizeof(&adapter_luid)) == 0) {
+			final_adapter = curr_adapter;
+			break;
+		}
+		curr_adapter->Release();
+		curr_adapter = nullptr;
+	}
+	dxgi_factory->Release();
+	return final_adapter;
+}
+
+static bool d3d_init(LUID &adapter_luid, ID3D11Device **d3d_device, ID3D11DeviceContext **d3d_context)
+{
+	IDXGIAdapter1 *adapter = d3d_get_adapter(adapter_luid);
+	D3D_FEATURE_LEVEL featureLevels[] = { D3D_FEATURE_LEVEL_11_0 };
+
+	if (adapter == nullptr)
+		return false;
+	if (FAILED(D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, 0, 0, featureLevels, _countof(featureLevels), D3D11_SDK_VERSION, d3d_device, nullptr, d3d_context)))
+		return false;
+
+	adapter->Release();
+	return true;
+}
+
 int main(int carc, const char** argv)
 {
+	bool d3d11_session = false;
+
 	printf("Starting\n");
 
 	HDC dc{};
@@ -169,7 +216,11 @@ int main(int carc, const char** argv)
 	XrDebugUtilsMessengerEXT debugMessenger = XR_NULL_HANDLE;
 
 	XrInstance instance = XR_NULL_HANDLE;
-	std::vector <const char*> enabledExts{ XR_EXT_DEBUG_UTILS_EXTENSION_NAME, XR_KHR_OPENGL_ENABLE_EXTENSION_NAME };
+	std::vector <const char*> enabledExts{ XR_EXT_DEBUG_UTILS_EXTENSION_NAME };
+	if (d3d11_session)
+		enabledExts.push_back(XR_KHR_D3D11_ENABLE_EXTENSION_NAME);
+	else
+		enabledExts.push_back(XR_KHR_OPENGL_ENABLE_EXTENSION_NAME);
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO, nullptr, 0, {"xr-test",1,"",0,XR_MAKE_VERSION(1,0,0) }, 0,nullptr, (uint32_t)enabledExts.size(),enabledExts.data() };
 	r = xrCreateInstance(&instInfo, &instance);
 	if (XR_FAILED(r)) {
@@ -184,8 +235,10 @@ int main(int carc, const char** argv)
 	//r = xrGetInstanceProcAddr(instance, "xrPollEvent", (PFN_xrVoidFunction*)&xrPollEvent);
 	r = xrGetInstanceProcAddr(instance, "xrCreateDebugUtilsMessengerEXT", (PFN_xrVoidFunction*)&xrCreateDebugUtilsMessengerEXTd);
 	r = xrGetInstanceProcAddr(instance, "xrDestroyDebugUtilsMessengerEXT", (PFN_xrVoidFunction*)&xrDestroyDebugUtilsMessengerEXTd);
-	r = xrGetInstanceProcAddr(instance, "xrGetOpenGLGraphicsRequirementsKHR", (PFN_xrVoidFunction*)&xrGetOpenGLGraphicsRequirementsKHRd);
-
+	if (d3d11_session)
+		r = xrGetInstanceProcAddr(instance, "xrGetD3D11GraphicsRequirementsKHR", (PFN_xrVoidFunction *)&xrGetD3D11GraphicsRequirementsKHRd);
+	else
+		r = xrGetInstanceProcAddr(instance, "xrGetOpenGLGraphicsRequirementsKHR", (PFN_xrVoidFunction*)&xrGetOpenGLGraphicsRequirementsKHRd);
 
 	XrDebugUtilsMessengerCreateInfoEXT messengerInfo{ XR_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT, nullptr,
 		XR_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | XR_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | XR_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | XR_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
@@ -240,7 +293,7 @@ int main(int carc, const char** argv)
 		printf("Config views: %d\n", cfgViewCount);
 		cfgViews.resize(cfgViewCount, { XR_TYPE_VIEW_CONFIGURATION_VIEW, nullptr });
 		r = xrEnumerateViewConfigurationViews(instance, systemId, viewConfigType, (uint32_t)cfgViews.size(), &cfgViewCount, cfgViews.data());
-		for (const auto& v : cfgViews) {
+		for (const auto &v : cfgViews) {
 			printf("  recomended %dx%dx%d, max %dx%dx%d\n", v.recommendedImageRectWidth, v.recommendedImageRectHeight, v.recommendedSwapchainSampleCount, v.maxImageRectWidth, v.maxImageRectHeight, v.maxSwapchainSampleCount);
 		}
 	}
@@ -256,13 +309,31 @@ int main(int carc, const char** argv)
 		}
 	}
 
-	XrGraphicsRequirementsOpenGLKHR glReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR,nullptr };
-	r = xrGetOpenGLGraphicsRequirementsKHRd(instance, systemId, &glReqs);
-	printf("OpenGL %d.%d required\n", XR_VERSION_MAJOR(glReqs.minApiVersionSupported), XR_VERSION_MINOR(glReqs.minApiVersionSupported));
+	XrSessionCreateInfo sessionInfo{ XR_TYPE_SESSION_CREATE_INFO, nullptr, 0, systemId };
+	XrGraphicsBindingOpenGLWin32KHR glWin32Binding{ XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR, nullptr, dc, glrc };
+	XrGraphicsBindingD3D11KHR d3d11Binding{ XR_TYPE_GRAPHICS_BINDING_D3D11_KHR, nullptr };
+
+	ID3D11Device *d3d11Device{};
+	ID3D11DeviceContext *d3d11Context{};
+	if (d3d11_session)
+	{
+		XrGraphicsRequirementsD3D11KHR d3d11Reqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR, nullptr };
+		r = xrGetD3D11GraphicsRequirementsKHRd(instance, systemId, &d3d11Reqs);
+		printf("D3D11 %X required\n", d3d11Reqs.minFeatureLevel);
+
+		d3d_init(d3d11Reqs.adapterLuid, &d3d11Device, &d3d11Context);
+		d3d11Binding.device = d3d11Device;
+		sessionInfo.next = &d3d11Binding;
+	}
+	else
+	{
+		XrGraphicsRequirementsOpenGLKHR glReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR,nullptr };
+		r = xrGetOpenGLGraphicsRequirementsKHRd(instance, systemId, &glReqs);
+		printf("OpenGL %d.%d required\n", XR_VERSION_MAJOR(glReqs.minApiVersionSupported), XR_VERSION_MINOR(glReqs.minApiVersionSupported));
+		sessionInfo.next = &glWin32Binding;
+	}
 
 	XrSession session = XR_NULL_HANDLE;
-	XrGraphicsBindingOpenGLWin32KHR glWin32Binding{ XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR, nullptr, dc, glrc };
-	XrSessionCreateInfo sessionInfo{ XR_TYPE_SESSION_CREATE_INFO, &glWin32Binding, 0, systemId };
 	r = xrCreateSession(instance, &sessionInfo, &session);
 	if (XR_FAILED(r)) {
 		char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
@@ -281,7 +352,7 @@ int main(int carc, const char** argv)
 		std::vector<int64_t>swapchainFormats(formatsCount);
 		r = xrEnumerateSwapchainFormats(session, formatsCount, &formatsCount, swapchainFormats.data());
 		for (const auto& f : swapchainFormats) {
-			printf("  0x%llX\n", f);
+			printf("  0x%llX (%d)\n", f, f);
 		}
 		swapchainFormat = swapchainFormats[0];
 		for (int i = 0; i < swapchainFormats.size(); i++)
@@ -293,6 +364,69 @@ int main(int carc, const char** argv)
 			}
 		}
 	}
+	//SteamVR
+	//gl
+	/*
+	0x81A5 (33189) GL_DEPTH_COMPONENT16
+	0x881B (34843) GL_RGB16F
+	0x8C43 (35907) GL_SRGB8_ALPHA8
+
+	0x805B (32859) GL_RGBA16
+	0x881A (34842) GL_RGBA16F
+	0x8C41 (35905) GL_SRGB8
+	0x81A6 (33190) GL_DEPTH_COMPONENT24
+	0x81A7 (33191) GL_DEPTH_COMPONENT32
+	*/
+	//d3d11
+	/*
+	0xA  (10) DXGI_FORMAT_R16G16B16A16_FLOAT
+	0x14 (20) DXGI_FORMAT_D32_FLOAT_S8X24_UINT
+	0x1D (29) DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+	0x28 (40) DXGI_FORMAT_D32_FLOAT
+	0x2D (45) DXGI_FORMAT_D24_UNORM_S8_UINT
+	0x37 (55) DXGI_FORMAT_D16_UNORM
+	0x5B (91) DXGI_FORMAT_B8G8R8A8_UNORM_SRGB
+
+	0x2   (2) DXGI_FORMAT_R32G32B32A32_FLOAT
+	0x18 (24) DXGI_FORMAT_R10G10B10A2_UNORM
+	*/
+
+	//Oculus link
+	//gl
+	/*
+	0x8058 (32856) GL_RGBA8
+	0x81A5 (33189) GL_DEPTH_COMPONENT16
+	0x881B (34843) GL_RGB16F
+	0x88F0 (35056) GL_DEPTH24_STENCIL8
+	0x8C3A (35898) GL_R11F_G11F_B10F
+	0x8C43 (35907) GL_SRGB8_ALPHA8
+	0x8CAC (36012) GL_DEPTH_COMPONENT32F
+	0x8CAD (36013) GL_DEPTH32F_STENCIL8
+	*/
+	//d3d11
+	/*
+	0xA (10) DXGI_FORMAT_R16G16B16A16_FLOAT
+	0x14 (20) DXGI_FORMAT_D32_FLOAT_S8X24_UINT
+	0x1A (26) DXGI_FORMAT_R11G11B10_FLOAT
+	0x1C (28) DXGI_FORMAT_R8G8B8A8_UNORM
+	0x1D (29) DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+	0x28 (40) DXGI_FORMAT_D32_FLOAT
+	0x2D (45) DXGI_FORMAT_D24_UNORM_S8_UINT
+	0x37 (55) DXGI_FORMAT_D16_UNORM
+	0x47 (71) DXGI_FORMAT_BC1_UNORM
+	0x48 (72) DXGI_FORMAT_BC1_UNORM_SRGB
+	0x4A (74) DXGI_FORMAT_BC2_UNORM
+	0x4B (75) DXGI_FORMAT_BC2_UNORM_SRGB
+	0x4D (77) DXGI_FORMAT_BC3_UNORM
+	0x4E (78) DXGI_FORMAT_BC3_UNORM_SRGB
+	0x57 (87) DXGI_FORMAT_B8G8R8A8_UNORM
+	0x5B (91) DXGI_FORMAT_B8G8R8A8_UNORM_SRGB
+	0x5D (93) DXGI_FORMAT_B8G8R8X8_UNORM_SRGB
+	0x5F (95) DXGI_FORMAT_BC6H_UF16
+	0x60 (96) DXGI_FORMAT_BC6H_SF16
+	0x62 (98) DXGI_FORMAT_BC7_UNORM
+	0x63 (99) DXGI_FORMAT_BC7_UNORM_SRGB
+	*/
 
 	XrSwapchain swapchains[2]{};
 	std::vector<XrSwapchainImageOpenGLKHR>swapchainImages[2]{};
@@ -453,7 +587,7 @@ int main(int carc, const char** argv)
 				printf("new session state %d, time %lld\n", sessionStateChange->state,sessionStateChange->time);
 				sessionState = sessionStateChange->state;
 				if (sessionState == XR_SESSION_STATE_READY) {
-					XrSessionBeginInfo sessionBeginInfo{XR_TYPE_SESSION_BEGIN_INFO,nullptr,viewConfigType};
+					XrSessionBeginInfo sessionBeginInfo{ XR_TYPE_SESSION_BEGIN_INFO, nullptr, viewConfigType };
 					XrResult sr = xrBeginSession(session, &sessionBeginInfo);
 					if (XR_FAILED(sr)) {
 						char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
@@ -475,7 +609,7 @@ int main(int carc, const char** argv)
 		{
 			char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
 			xrResultToString(XR_NULL_HANDLE, r, buffer);
-			printf("xrPollEvent returned %s\n", buffer);
+			printf("xrPollEvent returned %s (%d)\n", buffer, r);
 			if (XR_FAILED(r)) {
 				shouldClose = true;
 				continue;
@@ -507,7 +641,7 @@ int main(int carc, const char** argv)
 				uint32_t swapchainsImgIndex[2]{};
 				XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO,nullptr };
 				for (int i = 0; i < cfgViews.size(); i++) {
-					XrResult ar = xrAcquireSwapchainImage(swapchains[i], &acquireInfo, swapchainsImgIndex+i);
+					XrResult ar = xrAcquireSwapchainImage(swapchains[i], &acquireInfo, swapchainsImgIndex + i);
 					if (XR_FAILED(ar)) {
 						char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
 						xrResultToString(XR_NULL_HANDLE, ar, buffer);
