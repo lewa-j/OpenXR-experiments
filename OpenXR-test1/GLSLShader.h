@@ -1,8 +1,5 @@
 #pragma once
 
-#include <GL/glew.h>
-
-
 class GLSLShader
 {
 public:

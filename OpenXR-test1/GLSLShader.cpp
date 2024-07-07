@@ -7,6 +7,8 @@
 #include <vector>
 #include <string>
 
+#include "glad/glad.h"
+
 #define Log printf
 
 std::string FS_ReadAllText(const char* filename)
