@@ -57,6 +57,13 @@ PFN_xrPollEvent xrPollEvent;
 PFN_xrCreateDebugUtilsMessengerEXT xrCreateDebugUtilsMessengerEXTd;
 PFN_xrDestroyDebugUtilsMessengerEXT xrDestroyDebugUtilsMessengerEXTd;
 PFN_xrGetOpenGLGraphicsRequirementsKHR xrGetOpenGLGraphicsRequirementsKHRd;
+PFN_xrCreateRenderModelEXT xrCreateRenderModelEXTd;
+PFN_xrDestroyRenderModelEXT xrDestroyRenderModelEXTd;
+PFN_xrGetRenderModelPropertiesEXT xrGetRenderModelPropertiesEXTd;
+PFN_xrCreateRenderModelSpaceEXT xrCreateRenderModelSpaceEXTd;
+PFN_xrEnumerateInteractionRenderModelIdsEXT xrEnumerateInteractionRenderModelIdsEXTd;
+PFN_xrEnumerateRenderModelSubactionPathsEXT xrEnumerateRenderModelSubactionPathsEXTd;
+PFN_xrGetRenderModelPoseTopLevelUserPathEXT xrGetRenderModelPoseTopLevelUserPathEXTd;
 
 #define Log printf
 
@@ -136,9 +143,105 @@ bool CheckXrResult(XrResult r, const char *func)
 	return false;
 }
 
+struct interactionRenderModelsState
+{
+	XrInstance instance;
+	XrSession session;
+	XrPath topLevelUserPaths[5];
+	std::vector<XrRenderModelIdEXT> renderModelIds;
+
+	struct model
+	{
+		XrRenderModelEXT renderModel = XR_NULL_HANDLE;
+		XrUuidEXT cacheId;
+		uint32_t animatableNodeCount;
+		XrSpace space;
+
+		XrPath topLevelUserPath = XR_NULL_PATH;
+		std::vector<XrPath> subactionPaths;
+	};
+	std::vector<model> renderModels;
+};
+
+void EnumerateInteractionRenderModels(interactionRenderModelsState &state)
+{
+	if (state.renderModels.size())
+		return; // TODO
+
+	uint32_t count = 0;
+	XrResult r = xrEnumerateInteractionRenderModelIdsEXTd(state.session, nullptr, 0, &count, nullptr);
+	printf("%d(%s) xrEnumerateInteractionRenderModelIdsEXT count %d\n", r, XrEnumStr(r), count);
+	state.renderModelIds.resize(count);
+	if (!count)
+		return;
+	r = xrEnumerateInteractionRenderModelIdsEXTd(state.session, nullptr, (uint32_t)state.renderModelIds.size(), &count, state.renderModelIds.data());
+	if (r) printf("%d(%s) xrEnumerateInteractionRenderModelIdsEXT count %d\n", r, XrEnumStr(r), count);
+
+	state.renderModels.resize(count);
+	for (size_t i = 0; i < state.renderModelIds.size(); i++)
+	{
+		printf(" %zu: %" PRIX64 "\n", i, state.renderModelIds[i]);
+		auto &m = state.renderModels[i];
+
+		XrRenderModelCreateInfoEXT info{ XR_TYPE_RENDER_MODEL_CREATE_INFO_EXT, nullptr, state.renderModelIds[i], 0, nullptr};
+		r = xrCreateRenderModelEXTd(state.session, &info, &m.renderModel);
+		printf("%d(%s) xrCreateRenderModelEXT %p\n", r, XrEnumStr(r), m.renderModel);
+
+		XrRenderModelPropertiesGetInfoEXT getInfo{ XR_TYPE_RENDER_MODEL_PROPERTIES_GET_INFO_EXT };
+		XrRenderModelPropertiesEXT props{ XR_TYPE_RENDER_MODEL_PROPERTIES_EXT };
+		r = xrGetRenderModelPropertiesEXTd(m.renderModel, &getInfo, &props);
+		printf("%d(%s) xrGetRenderModelPropertiesEXT cacheID %.16" PRIX64 "%.16" PRIX64 " animatableNodeCount %d\n", r, XrEnumStr(r), ((uint64_t*)props.cacheId.data)[0], ((uint64_t *)props.cacheId.data)[1], props.animatableNodeCount);
+		m.cacheId = props.cacheId;
+		m.animatableNodeCount = props.animatableNodeCount;
+
+		XrInteractionRenderModelSubactionPathInfoEXT sapInfo{ XR_TYPE_INTERACTION_RENDER_MODEL_SUBACTION_PATH_INFO_EXT };
+		uint32_t pathCount = 0;
+		r = xrEnumerateRenderModelSubactionPathsEXTd(m.renderModel, &sapInfo, 0, &pathCount, nullptr);
+		printf("%d(%s) xrEnumerateRenderModelSubactionPathsEXT count %d\n", r, XrEnumStr(r), pathCount);
+		if (pathCount)
+		{
+			m.subactionPaths.resize(pathCount);
+			r = xrEnumerateRenderModelSubactionPathsEXTd(m.renderModel, &sapInfo, (uint32_t)m.subactionPaths.size(), &pathCount, m.subactionPaths.data());
+			if (r) printf("%d(%s) xrEnumerateRenderModelSubactionPathsEXT count %d\n", r, XrEnumStr(r), pathCount);
+			for (size_t pi = 0; pi < m.subactionPaths.size(); pi++)
+			{
+				char pathStr[XR_MAX_PATH_LENGTH]{ 0 };
+				uint32_t countOut = 0;
+				xrPathToString(state.instance, m.subactionPaths[pi], sizeof(pathStr), &countOut, pathStr);
+				printf("  %zu: %" PRIX64 " %s\n", pi, m.subactionPaths[pi], pathStr);
+			}
+		}
+
+		XrInteractionRenderModelTopLevelUserPathGetInfoEXT tlupGetInfo{ XR_TYPE_INTERACTION_RENDER_MODEL_TOP_LEVEL_USER_PATH_GET_INFO_EXT };
+		tlupGetInfo.topLevelUserPathCount = std::size(state.topLevelUserPaths);
+		tlupGetInfo.topLevelUserPaths = state.topLevelUserPaths;
+		r = xrGetRenderModelPoseTopLevelUserPathEXTd(m.renderModel, &tlupGetInfo, &m.topLevelUserPath);
+		char pathStr[XR_MAX_PATH_LENGTH]{ 0 };
+		uint32_t count = 0;
+		xrPathToString(state.instance, m.topLevelUserPath, sizeof(pathStr), &count, pathStr);
+		printf("%d(%s) xrGetRenderModelPoseTopLevelUserPathEXT %" PRIX64 " %s\n", r, XrEnumStr(r), m.topLevelUserPath, pathStr);
+
+		XrRenderModelSpaceCreateInfoEXT spaceInfo{ XR_TYPE_RENDER_MODEL_SPACE_CREATE_INFO_EXT, nullptr, m.renderModel };
+		r = xrCreateRenderModelSpaceEXTd(state.session, &spaceInfo, &m.space);
+		printf("%d(%s) xrCreateRenderModelSpaceEXT %p\n", r, XrEnumStr(r), m.space);
+
+
+	}
+}
+
+void DestroyRenderModels(interactionRenderModelsState &state)
+{
+	for (size_t i = 0; i < state.renderModels.size(); i++)
+	{
+		XrResult r = xrDestroyRenderModelEXTd(state.renderModels[i].renderModel);
+		printf("%d(%s) xrDestroyRenderModelEXT %p\n", r, XrEnumStr(r), state.renderModels[i].renderModel);
+	}
+	state.renderModels.clear();
+}
+
 int main(int carc, const char** argv)
 {
-	printf("Starting\n");
+	printf("Build with OpenXR SDK %d.%d.%d\n", XR_VERSION_MAJOR(XR_CURRENT_API_VERSION), XR_VERSION_MINOR(XR_CURRENT_API_VERSION), XR_VERSION_PATCH(XR_CURRENT_API_VERSION));
 
 	HDC dc{};
 	HGLRC glrc{};
@@ -200,15 +303,24 @@ int main(int carc, const char** argv)
 
 	bool have_EXT_debug_utils = false;
 	bool have_KHR_opengl_enable = false;
+	bool have_EXT_uuid = false;
+	bool have_EXT_render_model = false;
+	bool have_EXT_interaction_render_model = false;
+
 	for (int i = 0; i < exts.size(); i++)
 	{
 		Log(" %d: %s v%d\n", i, exts[i].extensionName, exts[i].extensionVersion);
 
 		if (!strcmp(exts[i].extensionName, "XR_EXT_debug_utils"))
 			have_EXT_debug_utils = true;
-
-		if (!strcmp(exts[i].extensionName, "XR_KHR_opengl_enable"))
+		else if (!strcmp(exts[i].extensionName, "XR_KHR_opengl_enable"))
 			have_KHR_opengl_enable = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_uuid"))
+			have_EXT_uuid = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_render_model"))
+			have_EXT_render_model = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_interaction_render_model"))
+			have_EXT_interaction_render_model = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -216,6 +328,11 @@ int main(int carc, const char** argv)
 	if (have_KHR_opengl_enable)
 		enabledExts.push_back("XR_KHR_opengl_enable");
 
+	if (have_EXT_interaction_render_model && have_EXT_render_model)
+	{
+		enabledExts.push_back("XR_EXT_render_model");
+		enabledExts.push_back("XR_EXT_interaction_render_model");
+	}
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -232,6 +349,15 @@ int main(int carc, const char** argv)
 	if (r == XR_ERROR_API_VERSION_UNSUPPORTED)
 	{
 		instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_0;
+
+		if (have_EXT_interaction_render_model && have_EXT_render_model && have_EXT_uuid)
+		{
+			enabledExts.push_back("XR_EXT_uuid");
+
+			instInfo.enabledExtensionCount = (uint32_t)enabledExts.size();
+			instInfo.enabledExtensionNames = enabledExts.data();
+		}
+
 		r = xrCreateInstance(&instInfo, &instance);
 		Log("%d(%s) create instance 1.0 %p\n", r, XrEnumStr(r), instance);
 	}
@@ -252,6 +378,21 @@ int main(int carc, const char** argv)
 	if (have_KHR_opengl_enable)
 		r = xrGetInstanceProcAddr(instance, "xrGetOpenGLGraphicsRequirementsKHR", (PFN_xrVoidFunction*)&xrGetOpenGLGraphicsRequirementsKHRd);
 
+	if (have_EXT_render_model)
+	{
+		r = xrGetInstanceProcAddr(instance, "xrCreateRenderModelEXT", (PFN_xrVoidFunction *)&xrCreateRenderModelEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrDestroyRenderModelEXT", (PFN_xrVoidFunction *)&xrDestroyRenderModelEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelPropertiesEXT", (PFN_xrVoidFunction *)&xrGetRenderModelPropertiesEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrCreateRenderModelSpaceEXT", (PFN_xrVoidFunction *)&xrCreateRenderModelSpaceEXTd);
+	}
+
+	if (have_EXT_interaction_render_model)
+	{
+		r = xrGetInstanceProcAddr(instance, "xrEnumerateInteractionRenderModelIdsEXT", (PFN_xrVoidFunction*)&xrEnumerateInteractionRenderModelIdsEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrEnumerateRenderModelSubactionPathsEXT", (PFN_xrVoidFunction*)&xrEnumerateRenderModelSubactionPathsEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelPoseTopLevelUserPathEXT", (PFN_xrVoidFunction*)&xrGetRenderModelPoseTopLevelUserPathEXTd);
+	}
+
 	XrDebugUtilsMessengerEXT debugMessenger = XR_NULL_HANDLE;
 
 	if (have_EXT_debug_utils)
@@ -269,16 +410,19 @@ int main(int carc, const char** argv)
 	Log("%d(%s) inst props: runtime: %s: %d.%d.%d\n", r, XrEnumStr(r), instProps.runtimeName, XR_VERSION_MAJOR(instProps.runtimeVersion), XR_VERSION_MINOR(instProps.runtimeVersion), XR_VERSION_PATCH(instProps.runtimeVersion));
 
 	XrSystemId systemId = XR_NULL_SYSTEM_ID;
-	XrFormFactor formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-	XrSystemGetInfo sysGetInfo{ XR_TYPE_SYSTEM_GET_INFO, nullptr, formFactor };
+	XrSystemGetInfo sysGetInfo{ XR_TYPE_SYSTEM_GET_INFO, nullptr, XR_FORM_FACTOR_HANDHELD_DISPLAY };
+	r = xrGetSystem(instance, &sysGetInfo, &systemId);
+	// were not realy need FORM_FACTOR_HANDHELD_DISPLAY, just checking support
+	Log("%d(%s) xrGetSystem FORM_FACTOR_HANDHELD_DISPLAY %" PRIX64 "\n", r, XrEnumStr(r), systemId);
+	sysGetInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	r = xrGetSystem(instance, &sysGetInfo, &systemId);
 	if (XR_FAILED(r))
 	{
-		CheckXrResult(r, "xrGetSystem");
+		CheckXrResult(r, "xrGetSystem XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY");
 		xrDestroyInstance(instance);
 		return -1;
 	}
-	Log("%d(%s) system %llX\n", r, XrEnumStr(r), systemId);
+	Log("%d(%s) system XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY %" PRIX64 "\n", r, XrEnumStr(r), systemId);
 
 	XrSystemProperties sysProps{ XR_TYPE_SYSTEM_PROPERTIES };
 	r = xrGetSystemProperties(instance, systemId, &sysProps);
@@ -340,6 +484,11 @@ int main(int carc, const char** argv)
 	XrPath handsPaths[2]{};
 	r = xrStringToPath(instance, "/user/hand/left", &handsPaths[0]);
 	r = xrStringToPath(instance, "/user/hand/right", &handsPaths[1]);
+
+	XrPath topLevelUserPaths[5]{ handsPaths[0],handsPaths[1] };
+	r = xrStringToPath(instance, "/user/head", &topLevelUserPaths[2]);
+	r = xrStringToPath(instance, "/user/gamepad", &topLevelUserPaths[3]);
+	r = xrStringToPath(instance, "/user/treadmill", &topLevelUserPaths[4]);
 
 	XrActionSet actionSet;
 	XrActionSetCreateInfo actionSetInfo{ XR_TYPE_ACTION_SET_CREATE_INFO,nullptr,"main","Main",0 };
@@ -439,6 +588,16 @@ int main(int carc, const char** argv)
 		return -1;
 	}
 	Log("%d(%s) session %p\n", r, XrEnumStr(r), session);
+
+	interactionRenderModelsState irmState;
+	irmState.instance = instance;
+	irmState.session = session;
+	static_assert(sizeof(irmState.topLevelUserPaths) == sizeof(topLevelUserPaths), "topLevelUserPaths size");
+	memcpy(irmState.topLevelUserPaths, topLevelUserPaths, sizeof(topLevelUserPaths));
+
+	// before xrSyncActions enumerates 0
+	if (have_EXT_interaction_render_model)
+		EnumerateInteractionRenderModels(irmState);
 
 	// spaces
 	uint32_t refSpacesCount = 0;
@@ -592,70 +751,96 @@ int main(int carc, const char** argv)
 	XrSessionState sessionState = XR_SESSION_STATE_UNKNOWN;
 	uint64_t renderedFrames = 0;
 	bool firstTime = true;
+	bool firstTimeFocused = true;
 
 	//loop
 	bool shouldClose = false;
 	while (!shouldClose)
 	{
-		XrEventDataBuffer event{ XR_TYPE_EVENT_DATA_BUFFER };
-		r = xrPollEvent(instance, &event);
-		if (r == XR_SUCCESS)
+		while (true)
 		{
-			printf("event type %d %s\n", event.type, XrEnumStr(event.type));
-			switch (event.type)
+			XrEventDataBuffer event{ XR_TYPE_EVENT_DATA_BUFFER };
+			r = xrPollEvent(instance, &event);
+			if (r == XR_SUCCESS)
 			{
-			case XR_TYPE_EVENT_DATA_EVENTS_LOST:
-				printf("events lost count %d\n", ((XrEventDataEventsLost*)&event)->lostEventCount);
-				break;
-			case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
-				printf("instance loss pending. Time %lld\n", ((XrEventDataInstanceLossPending*)&event)->lossTime);
-				shouldClose = true;
-				break;
-			case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED:
+				printf("event type %d %s\n", event.type, XrEnumStr(event.type));
+				switch (event.type)
 				{
-				XrEventDataSessionStateChanged* sessionStateChange = (XrEventDataSessionStateChanged*)&event;
-				printf("new session state %d(%s), time %lld\n", sessionStateChange->state, XrEnumStr(sessionStateChange->state), sessionStateChange->time);
-				sessionState = sessionStateChange->state;
-				if (sessionState == XR_SESSION_STATE_READY)
-				{
-					XrSessionBeginInfo sessionBeginInfo{XR_TYPE_SESSION_BEGIN_INFO,nullptr,viewConfigType};
-					XrResult sr = xrBeginSession(session, &sessionBeginInfo);
-					if (XR_FAILED(sr))
-					{
-						CheckXrResult(r, "xrBeginSession");
-						shouldClose = true;
-					}
-				}
-				else if (sessionState == XR_SESSION_STATE_STOPPING)
-					xrEndSession(session);
-				else if (sessionState == XR_SESSION_STATE_EXITING)
+				case XR_TYPE_EVENT_DATA_EVENTS_LOST:
+					printf("events lost count %d\n", ((XrEventDataEventsLost *)&event)->lostEventCount);
+					break;
+				case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
+					printf("instance loss pending. Time %lld\n", ((XrEventDataInstanceLossPending *)&event)->lossTime);
 					shouldClose = true;
+					break;
+				case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED:
+				{
+					XrEventDataSessionStateChanged *sessionStateChange = (XrEventDataSessionStateChanged *)&event;
+					printf("new session state %d(%s), time %lld\n", sessionStateChange->state, XrEnumStr(sessionStateChange->state), sessionStateChange->time);
+					sessionState = sessionStateChange->state;
+					if (sessionState == XR_SESSION_STATE_READY)
+					{
+						XrSessionBeginInfo sessionBeginInfo{ XR_TYPE_SESSION_BEGIN_INFO,nullptr,viewConfigType };
+						XrResult sr = xrBeginSession(session, &sessionBeginInfo);
+						if (XR_FAILED(sr))
+						{
+							CheckXrResult(r, "xrBeginSession");
+							shouldClose = true;
+						}
+					}
+					else if (sessionState == XR_SESSION_STATE_STOPPING)
+						xrEndSession(session);
+					else if (sessionState == XR_SESSION_STATE_EXITING)
+						shouldClose = true;
 
 				}
 				break;
-			case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
+				case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED:
 				{
-				const XrEventDataInteractionProfileChanged& e = *(XrEventDataInteractionProfileChanged*)&event;
-				XrInteractionProfileState profile{ XR_TYPE_INTERACTION_PROFILE_STATE };
-				r = xrGetCurrentInteractionProfile(e.session, handsPaths[1], &profile);
-				char profileStr[XR_MAX_PATH_LENGTH]{ 0 };
-				uint32_t count = 0;
-				if (profile.interactionProfile)
-					xrPathToString(instance, profile.interactionProfile, sizeof(profileStr), &count, profileStr);
-				Log(" right hand %lld %s\n", profile.interactionProfile, profileStr);
+					const XrEventDataInteractionProfileChanged &e = *(XrEventDataInteractionProfileChanged *)&event;
+					for (auto p : topLevelUserPaths)
+					{
+						XrInteractionProfileState profile{ XR_TYPE_INTERACTION_PROFILE_STATE };
+						r = xrGetCurrentInteractionProfile(e.session, p, &profile);
+						char profileStr[XR_MAX_PATH_LENGTH]{ 0 };
+						char userStr[XR_MAX_PATH_LENGTH]{ 0 };
+						if (profile.interactionProfile)
+						{
+							uint32_t count = 0;
+							xrPathToString(instance, profile.interactionProfile, sizeof(profileStr), &count, profileStr);
+							count = 0;
+							xrPathToString(instance, p, sizeof(userStr), &count, userStr);
+							Log(" %s %" PRId64 " %s\n", userStr, profile.interactionProfile, profileStr);
+						}
+					}
 				}
 				break;
+				case XR_TYPE_EVENT_DATA_INTERACTION_RENDER_MODELS_CHANGED_EXT:
+				{
+					const XrEventDataInteractionRenderModelsChangedEXT &e = *(XrEventDataInteractionRenderModelsChangedEXT *)&event;
+					if (have_EXT_interaction_render_model)
+						EnumerateInteractionRenderModels(irmState);
+				}
+				break;
+				}
 			}
-		}
-		else if(r != XR_EVENT_UNAVAILABLE)
-		{
-			printf("xrPollEvent returned %s\n", XrEnumStr(r));
-			if (XR_FAILED(r))
+			else if (r == XR_EVENT_UNAVAILABLE)
 			{
-				shouldClose = true;
-				continue;
+				break;
+			}
+			else
+			{
+				printf("xrPollEvent returned %s\n", XrEnumStr(r));
+				if (XR_FAILED(r))
+				{
+					shouldClose = true;
+					break;
+				}
 			}
 		}
+
+		if (shouldClose)
+			continue;
 		
 		glfwPollEvents();
 		if (glfwWindowShouldClose(window))
@@ -677,9 +862,21 @@ int main(int carc, const char** argv)
 			if (r != XR_SUCCESS)
 				return r;
 
-			XrActiveActionSet syncSet{ actionSet,XR_NULL_PATH };
-			XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO,nullptr,1,&syncSet };
-			xrSyncActions(session,&syncInfo);
+			XrActiveActionSet syncSet{ actionSet, XR_NULL_PATH };
+			XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO, nullptr, 1, &syncSet };
+			r = xrSyncActions(session, &syncInfo);
+			if (r && r != XR_SESSION_NOT_FOCUSED) Log("%d(%s) xrSyncActions\n", r, XrEnumStr(r));
+
+			if (firstTime || (firstTimeFocused && sessionState == XR_SESSION_STATE_FOCUSED))
+			{
+				if (have_EXT_interaction_render_model)
+				{
+					EnumerateInteractionRenderModels(irmState);
+				}
+				firstTime = false;
+				if (sessionState == XR_SESSION_STATE_FOCUSED)
+					firstTimeFocused = false;
+			}
 
 			if (frameState.shouldRender)
 			{
@@ -698,7 +895,7 @@ int main(int carc, const char** argv)
 						printf("Swapchain image acquired: %d\n", swapchainImgIndex);
 					}*/
 
-					XrSwapchainImageWaitInfo imageWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,nullptr, 100000000 };//100ms
+					XrSwapchainImageWaitInfo imageWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO, nullptr, 100000000 };//100ms
 					r = xrWaitSwapchainImage(viewsData[i].swapchain, &imageWaitInfo);
 					if (r) Log("%d(%s) wait image\n", r, XrEnumStr(r));
 					if (r != XR_SUCCESS)
@@ -719,7 +916,15 @@ int main(int carc, const char** argv)
 
 				XrSpaceLocation spaceLocations[2]{ {XR_TYPE_SPACE_LOCATION} ,{XR_TYPE_SPACE_LOCATION} };
 				xrLocateSpace(gripSpaces[0], localSpace, frameState.predictedDisplayTime, spaceLocations);
-				xrLocateSpace(gripSpaces[1], localSpace, frameState.predictedDisplayTime, spaceLocations+1);
+				xrLocateSpace(gripSpaces[1], localSpace, frameState.predictedDisplayTime, spaceLocations + 1);
+
+				std::vector<XrSpaceLocation> renderModelLocations(irmState.renderModels.size());
+				for (size_t i = 0; i < irmState.renderModels.size(); i++)
+				{
+					renderModelLocations[i] = { XR_TYPE_SPACE_LOCATION };
+					r = xrLocateSpace(irmState.renderModels[i].space, localSpace, frameState.predictedDisplayTime, &renderModelLocations[i]);
+					if (r) Log("%d(%s) xrLocateSpace irm %zu\n", r, XrEnumStr(r), i);
+				}
 
 				//RENDER!!!
 				for (int i = 0; i < views.size(); i++)
@@ -765,6 +970,18 @@ int main(int carc, const char** argv)
 						}
 					}
 
+					for (size_t rmi = 0; rmi < renderModelLocations.size(); rmi++)
+					{
+						auto &s = renderModelLocations[rmi];
+						if (s.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT
+							&& s.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT)
+						{
+							mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::make_vec3(&s.pose.position.x)) * glm::mat4(glm::make_quat(&s.pose.orientation.x)), glm::vec3(0.04f));
+							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
+							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
+						}
+					}
+
 					//glfwSwapBuffers(window);
 				}
 				glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -792,13 +1009,17 @@ int main(int carc, const char** argv)
 	}
 
 	printf("Rendered %lld frames\n",renderedFrames);
+
 	//destroy
+	if (have_EXT_interaction_render_model)
+		DestroyRenderModels(irmState);
+
 	for (size_t i = 0; i < cfgViews.size(); i++)
 	{
 		xrDestroySwapchain(viewsData[i].swapchain);
 	}
 	xrDestroySession(session);
-	if(have_EXT_debug_utils)
+	if (have_EXT_debug_utils)
 		xrDestroyDebugUtilsMessengerEXTd(debugMessenger);
 	xrDestroyInstance(instance);
 
