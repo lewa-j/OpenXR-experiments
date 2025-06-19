@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <vector>
+#include <inttypes.h>
 //#define XR_NO_PROTOTYPES 1
 #include "openxr/openxr.h"
 //#define XR_USE_GRAPHICS_API_VULKAN 1
@@ -36,13 +37,14 @@ const char* XrEnumStr(enumType e) {     \
     }                                             \
 }                                                 \
 
+XR_ENUM_STR(XrResult);
 XR_ENUM_STR(XrStructureType)
 XR_ENUM_STR(XrSessionState)
 XR_ENUM_STR(XrViewConfigurationType)
 XR_ENUM_STR(XrEnvironmentBlendMode)
 XR_ENUM_STR(XrReferenceSpaceType)
 
-const char* glfmt_to_str(int f);
+const char* glfmt_to_str(int64_t f);
 
 /*PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
 PFN_xrEnumerateApiLayerProperties xrEnumerateApiLayerProperties;
@@ -126,11 +128,9 @@ glm::mat4 FrustumXR(XrFovf fov, float nearf, float farf)
 bool CheckXrResult(XrResult r, const char *func)
 {
 	//if (XR_FAILED(r)) 
-	if(r != XR_SUCCESS)
+	if (r != XR_SUCCESS)
 	{
-		char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
-		xrResultToString(XR_NULL_HANDLE, r, buffer);
-		Log("%s failed %s\n", func, buffer);
+		Log("%s failed %s\n", func, XrEnumStr(r));
 		return true;
 	}
 	return false;
@@ -181,7 +181,7 @@ int main(int carc, const char** argv)
 
 	uint32_t layerCount = 0;
 	r = xrEnumerateApiLayerProperties(0, &layerCount, nullptr);
-	Log("%d api layers %d\n", r, layerCount);
+	Log("%d(%s) api layers %d\n", r, XrEnumStr(r), layerCount);
 	if (layerCount)
 	{
 		std::vector<XrApiLayerProperties> layers(layerCount, { XR_TYPE_API_LAYER_PROPERTIES });
@@ -191,7 +191,7 @@ int main(int carc, const char** argv)
 	}
 	uint32_t extCount = 0;
 	r = xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
-	Log("%d inst extensions %d\n", r, extCount);
+	Log("%d(%s) inst extensions %d\n", r, XrEnumStr(r), extCount);
 	std::vector<XrExtensionProperties> exts(extCount, { XR_TYPE_EXTENSION_PROPERTIES });
 	if (extCount)
 		xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, exts.data());
@@ -223,17 +223,17 @@ int main(int carc, const char** argv)
 	instInfo.applicationInfo.applicationVersion = 1;
 	strncpy(instInfo.applicationInfo.engineName, "", XR_MAX_ENGINE_NAME_SIZE);
 	instInfo.applicationInfo.engineVersion = 1;
-	instInfo.enabledExtensionCount = enabledExts.size();
+	instInfo.enabledExtensionCount = (uint32_t)enabledExts.size();
 	instInfo.enabledExtensionNames = enabledExts.data();
 
 	instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_1;
 	r = xrCreateInstance(&instInfo, &instance);
-	Log("%d create instance 1.1 %p\n", r, instance);
+	Log("%d(%s) create instance 1.1 %p\n", r, XrEnumStr(r), instance);
 	if (r == XR_ERROR_API_VERSION_UNSUPPORTED)
 	{
 		instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_0;
 		r = xrCreateInstance(&instInfo, &instance);
-		Log("%d create instance 1.0 %p\n", r, instance);
+		Log("%d(%s) create instance 1.0 %p\n", r, XrEnumStr(r), instance);
 	}
 
 	if (XR_FAILED(r))
@@ -261,12 +261,12 @@ int main(int carc, const char** argv)
 			XR_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | XR_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | XR_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | XR_DEBUG_UTILS_MESSAGE_TYPE_CONFORMANCE_BIT_EXT,
 			DebugMessengerCallback, nullptr };
 		r = xrCreateDebugUtilsMessengerEXTd(instance, &messengerInfo, &debugMessenger);
-		Log("%d DebugUtilsMessenger %p\n", r, debugMessenger);
+		Log("%d(%s) DebugUtilsMessenger %p\n", r, XrEnumStr(r), debugMessenger);
 	}
 
 	XrInstanceProperties instProps{ XR_TYPE_INSTANCE_PROPERTIES };
 	r = xrGetInstanceProperties(instance, &instProps);
-	Log("%d inst props: runtime: %s: %d.%d.%d\n", r, instProps.runtimeName, XR_VERSION_MAJOR(instProps.runtimeVersion), XR_VERSION_MINOR(instProps.runtimeVersion), XR_VERSION_PATCH(instProps.runtimeVersion));
+	Log("%d(%s) inst props: runtime: %s: %d.%d.%d\n", r, XrEnumStr(r), instProps.runtimeName, XR_VERSION_MAJOR(instProps.runtimeVersion), XR_VERSION_MINOR(instProps.runtimeVersion), XR_VERSION_PATCH(instProps.runtimeVersion));
 
 	XrSystemId systemId = XR_NULL_SYSTEM_ID;
 	XrFormFactor formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
@@ -278,11 +278,11 @@ int main(int carc, const char** argv)
 		xrDestroyInstance(instance);
 		return -1;
 	}
-	Log("%d system %llX\n", r, systemId);
+	Log("%d(%s) system %llX\n", r, XrEnumStr(r), systemId);
 
 	XrSystemProperties sysProps{ XR_TYPE_SYSTEM_PROPERTIES };
 	r = xrGetSystemProperties(instance, systemId, &sysProps);
-	Log("%d system props: vendor %X, %s", r, sysProps.vendorId, sysProps.systemName);
+	Log("%d(%s) system props: vendor %X, %s", r, XrEnumStr(r), sysProps.vendorId, sysProps.systemName);
 	Log(" graphics: max res %dx%d layers %d",
 		sysProps.graphicsProperties.maxSwapchainImageWidth,
 		sysProps.graphicsProperties.maxSwapchainImageHeight,
@@ -293,11 +293,11 @@ int main(int carc, const char** argv)
 
 	uint32_t viewConfigCount = 0;
 	r = xrEnumerateViewConfigurations(instance, systemId, 0, &viewConfigCount, nullptr);
-	Log("%d view configs %d\n", r, viewConfigCount);
+	Log("%d(%s) view configs %d\n", r, XrEnumStr(r), viewConfigCount);
 	std::vector<XrViewConfigurationType> viewConfigs(viewConfigCount);
 	if (viewConfigCount)
 		r = xrEnumerateViewConfigurations(instance, systemId, (uint32_t)viewConfigs.size(), &viewConfigCount, viewConfigs.data());
-	for (int i = 0; i < viewConfigCount; i++)
+	for (int i = 0; i < (int)viewConfigCount; i++)
 	{
 		XrViewConfigurationProperties viewConfigProps{ XR_TYPE_VIEW_CONFIGURATION_PROPERTIES };
 		r = xrGetViewConfigurationProperties(instance, systemId, viewConfigs[i], &viewConfigProps);
@@ -307,7 +307,7 @@ int main(int carc, const char** argv)
 	uint32_t cfgViewCount = 0;
 	std::vector<XrViewConfigurationView> cfgViews;
 	r = xrEnumerateViewConfigurationViews(instance, systemId, viewConfigType, 0, &cfgViewCount, nullptr);
-	Log("%d view cfg views %d\n", r, cfgViewCount);
+	Log("%d(%s) view cfg views %d\n", r, XrEnumStr(r), cfgViewCount);
 	if (viewConfigCount)
 	{
 		cfgViews.resize(cfgViewCount, { XR_TYPE_VIEW_CONFIGURATION_VIEW, nullptr });
@@ -326,12 +326,12 @@ int main(int carc, const char** argv)
 
 	uint32_t envBlendModesCount = 0;
 	r = xrEnumerateEnvironmentBlendModes(instance, systemId, viewConfigType, 0, &envBlendModesCount, nullptr);
-	Log("%d Environment Blend Modes %d\n", r, envBlendModesCount);
+	Log("%d(%s) Environment Blend Modes %d\n", r, XrEnumStr(r), envBlendModesCount);
 	if (envBlendModesCount)
 	{
 		std::vector<XrEnvironmentBlendMode> blendModes(envBlendModesCount);
-		r = xrEnumerateEnvironmentBlendModes(instance, systemId, viewConfigType, blendModes.size(), &envBlendModesCount, blendModes.data());
-		for (int i = 0; i < envBlendModesCount; i++)
+		r = xrEnumerateEnvironmentBlendModes(instance, systemId, viewConfigType, (uint32_t)blendModes.size(), &envBlendModesCount, blendModes.data());
+		for (int i = 0; i < (int)envBlendModesCount; i++)
 			Log(" %d: %X %s\n", i, blendModes[i], XrEnumStr(blendModes[i]));
 	}
 
@@ -356,7 +356,7 @@ int main(int carc, const char** argv)
 	strcpy(actionInfo.localizedActionName, "Click");
 	actionInfo.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
 	r = xrCreateAction(actionSet, &actionInfo, &clickAction);
-	Log("%d action click %p\n", r, clickAction);
+	Log("%d(%s) action click %p\n", r, XrEnumStr(r), clickAction);
 
 	XrActionSuggestedBinding bindings[4];
 	bindings[0].action = handAction;
@@ -374,53 +374,53 @@ int main(int carc, const char** argv)
 
 	xrStringToPath(instance, "/interaction_profiles/htc/vive_controller", &suggestedBindings.interactionProfile);
 	r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-	Log("%d suggestInteractionProfileBindings htc/vive_controller\n", r);
+	Log("%d(%s) suggestInteractionProfileBindings htc/vive_controller\n", r, XrEnumStr(r));
 	CheckXrResult(r, "xrSuggestInteractionProfileBindings vive");
 
 	{
 		xrStringToPath(instance, "/interaction_profiles/microsoft/motion_controller", &suggestedBindings.interactionProfile);
 		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d suggestInteractionProfileBindings microsoft/motion_controller\n", r);
+		Log("%d(%s) suggestInteractionProfileBindings microsoft/motion_controller\n", r, XrEnumStr(r));
 
 		// 1.1 standard
 
 		xrStringToPath(instance, "/interaction_profiles/bytedance/pico_neo3_controller", &suggestedBindings.interactionProfile);
 		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d suggestInteractionProfileBindings bytedance/pico_neo3_controller\n", r);
+		Log("%d(%s) suggestInteractionProfileBindings bytedance/pico_neo3_controller\n", r, XrEnumStr(r));
 
 		xrStringToPath(instance, "/interaction_profiles/bytedance/pico4_controller", &suggestedBindings.interactionProfile);
 		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d suggestInteractionProfileBindings bytedance/pico4_controller\n", r);
+		Log("%d(%s) suggestInteractionProfileBindings bytedance/pico4_controller\n", r, XrEnumStr(r));
 
 		//non standart
 		xrStringToPath(instance, "/interaction_profiles/pico/neo3_controller", &suggestedBindings.interactionProfile);
 		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d suggestInteractionProfileBindings pico/neo3_controller\n", r);
+		Log("%d(%s) suggestInteractionProfileBindings pico/neo3_controller\n", r, XrEnumStr(r));
 
 		//if (xr_11)
 		{
 			xrStringToPath(instance, "/interaction_profiles/meta/touch_controller_quest_2", &suggestedBindings.interactionProfile);
 			r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-			Log("%d suggestInteractionProfileBindings meta/touch_controller_quest_2\n", r);
+			Log("%d(%s) suggestInteractionProfileBindings meta/touch_controller_quest_2\n", r, XrEnumStr(r));
 		}
 		//else
 		{
 			xrStringToPath(instance, "/interaction_profiles/oculus/touch_controller", &suggestedBindings.interactionProfile);
 			r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-			Log("%d suggestInteractionProfileBindings oculus/touch_controller\n", r);
+			Log("%d(%s) suggestInteractionProfileBindings oculus/touch_controller\n", r, XrEnumStr(r));
 
 		}
 
 		xrStringToPath(instance, "/interaction_profiles/valve/index_controller", &suggestedBindings.interactionProfile);
 		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d suggestInteractionProfileBindings valve/index_controller\n", r);
+		Log("%d(%s) suggestInteractionProfileBindings valve/index_controller\n", r, XrEnumStr(r));
 	}
 
 	xrStringToPath(instance, "/interaction_profiles/khr/simple_controller", &suggestedBindings.interactionProfile);
 	xrStringToPath(instance, "/user/hand/left/input/select", &(bindings[2].binding));
 	xrStringToPath(instance, "/user/hand/right/input/select", &(bindings[3].binding));
 	r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-	Log("%d suggestInteractionProfileBindings khr/simple_controller\n", r);
+	Log("%d(%s) suggestInteractionProfileBindings khr/simple_controller\n", r, XrEnumStr(r));
 	CheckXrResult(r, "xrSuggestInteractionProfileBindings khr/simple_controller");
 
 	//session
@@ -438,21 +438,21 @@ int main(int carc, const char** argv)
 		xrDestroyInstance(instance);
 		return -1;
 	}
-	Log("%d session %p\n", r, session);
+	Log("%d(%s) session %p\n", r, XrEnumStr(r), session);
 
 	// spaces
 	uint32_t refSpacesCount = 0;
 	r = xrEnumerateReferenceSpaces(session, 0, &refSpacesCount, nullptr);
-	Log("%d reference space types %d\n", r, refSpacesCount);
+	Log("%d(%s) reference space types %d\n", r, XrEnumStr(r), refSpacesCount);
 	if (refSpacesCount)
 	{
 		std::vector<XrReferenceSpaceType> refSpaceTypes(refSpacesCount);
-		r = xrEnumerateReferenceSpaces(session, refSpaceTypes.size(), &refSpacesCount, refSpaceTypes.data());
-		for (int i = 0; i < refSpacesCount; i++)
+		r = xrEnumerateReferenceSpaces(session, (uint32_t)refSpaceTypes.size(), &refSpacesCount, refSpaceTypes.data());
+		for (int i = 0; i < (int)refSpacesCount; i++)
 		{
 			XrExtent2Df bounds{};
 			XrResult br = xrGetReferenceSpaceBoundsRect(session, refSpaceTypes[i], &bounds);
-			Log(" %d: %X %s, %d bounds %fx%f\n", i, refSpaceTypes[i], XrEnumStr(refSpaceTypes[i]), br, bounds.width, bounds.height);
+			Log(" %d: %X %s, %d(%s) bounds %fx%f\n", i, refSpaceTypes[i], XrEnumStr(refSpaceTypes[i]), br, XrEnumStr(br), bounds.width, bounds.height);
 		}
 	}
 
@@ -461,24 +461,23 @@ int main(int carc, const char** argv)
 	refSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
 	refSpaceCreateInfo.poseInReferenceSpace = { {0,0,0,1},{0,0,0} };
 	r = xrCreateReferenceSpace(session, &refSpaceCreateInfo, &localSpace);
-	if (XR_FAILED(r)) {
-		char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
-		xrResultToString(XR_NULL_HANDLE, r, buffer);
-		printf("xrCreateReferenceSpace failed %s\n", buffer);
+	if (XR_FAILED(r))
+	{
+		printf("xrCreateReferenceSpace failed %s\n", XrEnumStr(r));
 	}
-	Log("%d create local ref space %p\n", r, localSpace);
+	Log("%d(%s) create local ref space %p\n", r, XrEnumStr(r), localSpace);
 
 	// swapchain
 
 	uint32_t formatsCount = 0;
 	r = xrEnumerateSwapchainFormats(session, 0, &formatsCount, nullptr);
-	Log("%d swapchain formats: %d\n", r, formatsCount);
+	Log("%d(%s) swapchain formats: %d\n", r, XrEnumStr(r), formatsCount);
 	int64_t swapchainFormat = 0;
 	if (formatsCount)
 	{
 		std::vector<int64_t>swapchainFormats(formatsCount);
 		r = xrEnumerateSwapchainFormats(session, formatsCount, &formatsCount, swapchainFormats.data());
-		for (int i = 0; i < formatsCount; i++)
+		for (int i = 0; i < (int)formatsCount; i++)
 		{
 			Log(" %d: %llX %s\n", i, swapchainFormats[i], glfmt_to_str(swapchainFormats[i]));
 			if (swapchainFormats[i] == GL_SRGB8_ALPHA8)
@@ -511,26 +510,25 @@ int main(int carc, const char** argv)
 		scInfo.arraySize = 1;
 		scInfo.mipCount = 1;
 		r = xrCreateSwapchain(session, &scInfo, &viewsData[i].swapchain);
-		if (XR_FAILED(r)) {
-			char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
-			xrResultToString(XR_NULL_HANDLE, r, buffer);
-			printf("xrCreateSwapchain %d failed %s\n", i, buffer);
+		if (XR_FAILED(r))
+		{
+			printf("xrCreateSwapchain %d failed %s\n", i, XrEnumStr(r));
 			xrDestroySession(session);
 			xrDestroyInstance(instance);
 			return -1;
 		}
-		Log("%d swapchain[%d] %p\n", r, i, viewsData[i].swapchain);
+		Log("%d(%s) swapchain[%d] %p\n", r, XrEnumStr(r), i, viewsData[i].swapchain);
 		viewsData[i].rect = { {0,0}, {(int32_t)cfgViews[i].recommendedImageRectWidth, (int32_t)cfgViews[i].recommendedImageRectHeight} };
 
 		uint32_t swapchainImgCount = 0;
 		r = xrEnumerateSwapchainImages(viewsData[i].swapchain, 0, &swapchainImgCount, nullptr);
-		Log("%d images count %d\n", r, swapchainImgCount);
+		Log("%d(%s) images count %d\n", r, XrEnumStr(r), swapchainImgCount);
 		if (swapchainImgCount)
 		{
 			viewsData[i].images.resize(swapchainImgCount, { XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR });
 			r = xrEnumerateSwapchainImages(viewsData[i].swapchain, swapchainImgCount, &swapchainImgCount, (XrSwapchainImageBaseHeader*)viewsData[i].images.data());
 
-			for (int j = 0; j < swapchainImgCount; j++)
+			for (int j = 0; j < (int)swapchainImgCount; j++)
 				Log(" %d: %d\n", j, viewsData[i].images[j].image);
 		}
 	}
@@ -538,15 +536,15 @@ int main(int carc, const char** argv)
 	XrSpace gripSpaces[2]{};
 	XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO,nullptr,handAction,handsPaths[0],{{0,0,0,1},{0,0,0}} };
 	r = xrCreateActionSpace(session, &actionSpaceInfo, gripSpaces);
-	CheckXrResult(r,"xrCreateActionSpace l");
+	CheckXrResult(r, "xrCreateActionSpace l");
 	actionSpaceInfo.subactionPath = handsPaths[1];
 	r = xrCreateActionSpace(session, &actionSpaceInfo, gripSpaces+1);
-	CheckXrResult(r,"xrCreateActionSpace r");
+	CheckXrResult(r, "xrCreateActionSpace r");
 
 	XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO,nullptr,1,&actionSet};
 	r = xrAttachSessionActionSets(session, &attachInfo);
 	CheckXrResult(r, "xrAttachSessionActionSets");
-	Log("%d attachSessionActionSets\n", r);
+	Log("%d(%s) attachSessionActionSets\n", r, XrEnumStr(r));
 
 	XrInteractionProfileState profile{ XR_TYPE_INTERACTION_PROFILE_STATE };
 	r = xrGetCurrentInteractionProfile(session, handsPaths[1], &profile);
@@ -554,7 +552,7 @@ int main(int carc, const char** argv)
 	uint32_t count = 0;
 	if (profile.interactionProfile)
 		xrPathToString(instance, profile.interactionProfile, sizeof(profileStr), &count, profileStr);
-	Log("%d currentInteractionProfile for right hand %lld %s\n", r, profile.interactionProfile, profileStr);
+	Log("%d(%s) currentInteractionProfile for right hand %lld %s\n", r, XrEnumStr(r), profile.interactionProfile, profileStr);
 
 	for (int i = 0; i < cfgViews.size(); i++)
 	{
@@ -651,10 +649,9 @@ int main(int carc, const char** argv)
 		}
 		else if(r != XR_EVENT_UNAVAILABLE)
 		{
-			char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
-			xrResultToString(XR_NULL_HANDLE, r, buffer);
-			printf("xrPollEvent returned %s\n", buffer);
-			if (XR_FAILED(r)) {
+			printf("xrPollEvent returned %s\n", XrEnumStr(r));
+			if (XR_FAILED(r))
+			{
 				shouldClose = true;
 				continue;
 			}
@@ -670,13 +667,13 @@ int main(int carc, const char** argv)
 			XrFrameWaitInfo frameWaitInfo{XR_TYPE_FRAME_WAIT_INFO,nullptr};
 			XrFrameState frameState{ XR_TYPE_FRAME_STATE,nullptr };
 			r = xrWaitFrame(session, &frameWaitInfo, &frameState);
-			if (r) Log("%d wait frame: time %lld %lld render %d\n", r, frameState.predictedDisplayTime, frameState.predictedDisplayPeriod, frameState.shouldRender);
+			if (r) Log("%d(%s) wait frame: time %lld %lld render %d\n", r, XrEnumStr(r), frameState.predictedDisplayTime, frameState.predictedDisplayPeriod, frameState.shouldRender);
 			if (r != XR_SUCCESS)
 				return r;
 			
 			XrFrameBeginInfo frameBeginInfo{ XR_TYPE_FRAME_BEGIN_INFO,nullptr };
 			r = xrBeginFrame(session, &frameBeginInfo);
-			if (r) Log("%d begin frame\n", r);
+			if (r) Log("%d(%s) begin frame\n", r, XrEnumStr(r));
 			if (r != XR_SUCCESS)
 				return r;
 
@@ -694,9 +691,7 @@ int main(int carc, const char** argv)
 					XrResult ar = xrAcquireSwapchainImage(viewsData[i].swapchain, &acquireInfo, &swapchainsImgIndex[i]);
 					if (XR_FAILED(ar))
 					{
-						char buffer[XR_MAX_RESULT_STRING_SIZE] = "";
-						xrResultToString(XR_NULL_HANDLE, ar, buffer);
-						printf("xrAcquireSwapchainImage %d failed %s\n", i, buffer);
+						printf("xrAcquireSwapchainImage %d failed %s\n", i, XrEnumStr(r));
 						return r;
 					}
 					/*else {
@@ -705,7 +700,7 @@ int main(int carc, const char** argv)
 
 					XrSwapchainImageWaitInfo imageWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,nullptr, 100000000 };//100ms
 					r = xrWaitSwapchainImage(viewsData[i].swapchain, &imageWaitInfo);
-					if (r) Log("%d wait image\n", r);
+					if (r) Log("%d(%s) wait image\n", r, XrEnumStr(r));
 					if (r != XR_SUCCESS)
 						return r;
 				}
@@ -713,8 +708,8 @@ int main(int carc, const char** argv)
 				XrViewLocateInfo viewLocateInfo{XR_TYPE_VIEW_LOCATE_INFO,nullptr,viewConfigType,frameState.predictedDisplayTime, localSpace };
 				XrViewState viewState{ XR_TYPE_VIEW_STATE };
 				uint32_t viewCount = 0;
-				r = xrLocateViews(session, &viewLocateInfo, &viewState, views.size(), &viewCount, views.data());
-				if (r) Log("%d locate views: flags %X. views %d\n", r, viewState.viewStateFlags, count);
+				r = xrLocateViews(session, &viewLocateInfo, &viewState, (uint32_t)views.size(), &viewCount, views.data());
+				if (r) Log("%d(%s) locate views: flags %" PRIX64 ". views %d\n", r, XrEnumStr(r), viewState.viewStateFlags, count);
 
 				for (size_t i = 0; i < views.size(); i++)
 				{
@@ -737,7 +732,7 @@ int main(int carc, const char** argv)
 					//glBindFramebuffer(GL_FRAMEBUFFER, 0);
 					//glViewport(0,0,800,480);
 
-					glClearColor(0.3, 0.4, 0.6, 1.0);
+					glClearColor(0.3f, 0.4f, 0.6f, 1.0f);
 					glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 					glm::mat4 vpMtx(1);
@@ -756,7 +751,7 @@ int main(int carc, const char** argv)
 					glBindVertexArray(cubeVAO);
 					glDrawElements(GL_LINES,24,GL_UNSIGNED_SHORT,0);
 
-					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0.2, 0.0, -0.3)), glm::vec3(0.1));
+					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0.2, 0.0, -0.3)), glm::vec3(0.1f));
 					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 					glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 
@@ -764,7 +759,7 @@ int main(int carc, const char** argv)
 					{
 						if (spaceLocations[h].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
 						{
-							mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::make_vec3(&spaceLocations[h].pose.position.x)) * glm::mat4(glm::make_quat(&spaceLocations[h].pose.orientation.x)), glm::vec3(0.05));
+							mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::make_vec3(&spaceLocations[h].pose.position.x)) * glm::mat4(glm::make_quat(&spaceLocations[h].pose.orientation.x)), glm::vec3(0.05f));
 							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 						}
@@ -779,7 +774,7 @@ int main(int carc, const char** argv)
 				for (int i = 0; i < cfgViews.size(); i++)
 				{
 					r = xrReleaseSwapchainImage(viewsData[i].swapchain, &imageReleaseInfo);
-					if (r) Log("%d release image\n", r);
+					if (r) Log("%d(%s) release image\n", r, XrEnumStr(r));
 				}
 				
 				layerProjection = { XR_TYPE_COMPOSITION_LAYER_PROJECTION, nullptr, 0,localSpace,(uint32_t)layerProjViews.size(),layerProjViews.data() };
@@ -788,9 +783,9 @@ int main(int carc, const char** argv)
 				renderedFrames++;
 			}
 
-			XrFrameEndInfo frameEndInfo{ XR_TYPE_FRAME_END_INFO,nullptr,frameState.predictedDisplayTime,XR_ENVIRONMENT_BLEND_MODE_OPAQUE,frameLayers.size(),frameLayers.data()};
+			XrFrameEndInfo frameEndInfo{ XR_TYPE_FRAME_END_INFO, nullptr, frameState.predictedDisplayTime, XR_ENVIRONMENT_BLEND_MODE_OPAQUE, (uint32_t)frameLayers.size(), frameLayers.data() };
 			r = xrEndFrame(session, &frameEndInfo);
-			if (r) Log("%d end frame\n", r);
+			if (r) Log("%d(%s) end frame\n", r, XrEnumStr(r));
 			if (r != XR_SUCCESS)
 				return r;
 		}
@@ -814,7 +809,7 @@ int main(int carc, const char** argv)
 }
 
 
-const char* glfmt_to_str(int f)
+const char* glfmt_to_str(int64_t f)
 {
 	switch (f)
 	{
