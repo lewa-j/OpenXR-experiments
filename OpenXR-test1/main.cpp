@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <vector>
 #include <inttypes.h>
+#include <filesystem>
+
 //#define XR_NO_PROTOTYPES 1
 #include "openxr/openxr.h"
 //#define XR_USE_GRAPHICS_API_VULKAN 1
@@ -61,6 +63,9 @@ PFN_xrCreateRenderModelEXT xrCreateRenderModelEXTd;
 PFN_xrDestroyRenderModelEXT xrDestroyRenderModelEXTd;
 PFN_xrGetRenderModelPropertiesEXT xrGetRenderModelPropertiesEXTd;
 PFN_xrCreateRenderModelSpaceEXT xrCreateRenderModelSpaceEXTd;
+PFN_xrCreateRenderModelAssetEXT xrCreateRenderModelAssetEXTd;
+PFN_xrDestroyRenderModelAssetEXT xrDestroyRenderModelAssetEXTd;
+PFN_xrGetRenderModelAssetDataEXT xrGetRenderModelAssetDataEXTd;
 PFN_xrEnumerateInteractionRenderModelIdsEXT xrEnumerateInteractionRenderModelIdsEXTd;
 PFN_xrEnumerateRenderModelSubactionPathsEXT xrEnumerateRenderModelSubactionPathsEXTd;
 PFN_xrGetRenderModelPoseTopLevelUserPathEXT xrGetRenderModelPoseTopLevelUserPathEXTd;
@@ -177,6 +182,8 @@ void EnumerateInteractionRenderModels(interactionRenderModelsState &state)
 	r = xrEnumerateInteractionRenderModelIdsEXTd(state.session, nullptr, (uint32_t)state.renderModelIds.size(), &count, state.renderModelIds.data());
 	if (r) printf("%d(%s) xrEnumerateInteractionRenderModelIdsEXT count %d\n", r, XrEnumStr(r), count);
 
+	std::filesystem::create_directory("modelCache");
+
 	state.renderModels.resize(count);
 	for (size_t i = 0; i < state.renderModelIds.size(); i++)
 	{
@@ -225,7 +232,33 @@ void EnumerateInteractionRenderModels(interactionRenderModelsState &state)
 		r = xrCreateRenderModelSpaceEXTd(state.session, &spaceInfo, &m.space);
 		printf("%d(%s) xrCreateRenderModelSpaceEXT %p\n", r, XrEnumStr(r), m.space);
 
+		XrRenderModelAssetEXT asset = XR_NULL_HANDLE;
+		XrRenderModelAssetCreateInfoEXT assetInfo{ XR_TYPE_RENDER_MODEL_ASSET_CREATE_INFO_EXT, nullptr, m.cacheId };
+		r = xrCreateRenderModelAssetEXTd(state.session, &assetInfo, &asset);
+		printf("%d(%s) xrCreateRenderModelAssetEXT %p\n", r, XrEnumStr(r), asset);
 
+		XrRenderModelAssetDataGetInfoEXT assetGetInfo{ XR_TYPE_RENDER_MODEL_ASSET_DATA_GET_INFO_EXT };
+		XrRenderModelAssetDataEXT assetBuffer{ XR_TYPE_RENDER_MODEL_ASSET_DATA_EXT };
+		r = xrGetRenderModelAssetDataEXTd(asset, &assetGetInfo, &assetBuffer);
+		printf("%d(%s) xrGetRenderModelAssetDataEXT %d\n", r, XrEnumStr(r), assetBuffer.bufferCountOutput);
+		std::vector<uint8_t> assetBytes(assetBuffer.bufferCountOutput);
+		assetBuffer.bufferCapacityInput = (uint32_t)assetBytes.size();
+		assetBuffer.buffer = assetBytes.data();
+		r = xrGetRenderModelAssetDataEXTd(asset, &assetGetInfo, &assetBuffer);
+		printf("%d(%s) xrGetRenderModelAssetDataEXT %d\n", r, XrEnumStr(r), assetBuffer.bufferCountOutput);
+
+		char filePath[MAX_PATH]{0};
+		snprintf(filePath, sizeof(filePath) - 1, "modelCache/%.16" PRIX64 "%.16" PRIX64 ".glb", ((uint64_t *)m.cacheId.data)[0], ((uint64_t *)m.cacheId.data)[1]);
+		FILE *outFile = fopen(filePath, "wb");
+		if (outFile)
+		{
+			printf("writing file \"%s\"\n", filePath);
+			fwrite(assetBytes.data(), 1, assetBytes.size(), outFile);
+			fclose(outFile);
+		}
+
+		r = xrDestroyRenderModelAssetEXTd(asset);
+		printf("%d(%s) xrDestroyRenderModelAssetEXT\n", r, XrEnumStr(r));
 	}
 }
 
@@ -384,6 +417,9 @@ int main(int carc, const char** argv)
 		r = xrGetInstanceProcAddr(instance, "xrDestroyRenderModelEXT", (PFN_xrVoidFunction *)&xrDestroyRenderModelEXTd);
 		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelPropertiesEXT", (PFN_xrVoidFunction *)&xrGetRenderModelPropertiesEXTd);
 		r = xrGetInstanceProcAddr(instance, "xrCreateRenderModelSpaceEXT", (PFN_xrVoidFunction *)&xrCreateRenderModelSpaceEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrCreateRenderModelAssetEXT", (PFN_xrVoidFunction *)&xrCreateRenderModelAssetEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrDestroyRenderModelAssetEXT", (PFN_xrVoidFunction *)&xrDestroyRenderModelAssetEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelAssetDataEXT", (PFN_xrVoidFunction *)&xrGetRenderModelAssetDataEXTd);
 	}
 
 	if (have_EXT_interaction_render_model)
