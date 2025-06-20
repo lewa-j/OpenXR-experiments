@@ -23,6 +23,7 @@
 
 #include "GLSLShader.h"
 
+#define GLM_FORCE_QUAT_DATA_XYZW 1
 #include <glm.hpp>
 #include <gtc/matrix_transform.hpp>
 #include <gtc/quaternion.hpp>
@@ -66,6 +67,8 @@ PFN_xrCreateRenderModelSpaceEXT xrCreateRenderModelSpaceEXTd;
 PFN_xrCreateRenderModelAssetEXT xrCreateRenderModelAssetEXTd;
 PFN_xrDestroyRenderModelAssetEXT xrDestroyRenderModelAssetEXTd;
 PFN_xrGetRenderModelAssetDataEXT xrGetRenderModelAssetDataEXTd;
+PFN_xrGetRenderModelAssetPropertiesEXT xrGetRenderModelAssetPropertiesEXTd;
+PFN_xrGetRenderModelStateEXT xrGetRenderModelStateEXTd;
 PFN_xrEnumerateInteractionRenderModelIdsEXT xrEnumerateInteractionRenderModelIdsEXTd;
 PFN_xrEnumerateRenderModelSubactionPathsEXT xrEnumerateRenderModelSubactionPathsEXTd;
 PFN_xrGetRenderModelPoseTopLevelUserPathEXT xrGetRenderModelPoseTopLevelUserPathEXTd;
@@ -159,8 +162,10 @@ struct interactionRenderModelsState
 	{
 		XrRenderModelEXT renderModel = XR_NULL_HANDLE;
 		XrUuidEXT cacheId;
-		uint32_t animatableNodeCount;
 		XrSpace space;
+		XrSpaceLocation location;
+		std::vector<XrRenderModelAssetNodePropertiesEXT> assetNodeProps;
+		std::vector<XrRenderModelNodeStateEXT> nodesState;
 
 		XrPath topLevelUserPath = XR_NULL_PATH;
 		std::vector<XrPath> subactionPaths;
@@ -199,7 +204,6 @@ void EnumerateInteractionRenderModels(interactionRenderModelsState &state)
 		r = xrGetRenderModelPropertiesEXTd(m.renderModel, &getInfo, &props);
 		printf("%d(%s) xrGetRenderModelPropertiesEXT cacheID %.16" PRIX64 "%.16" PRIX64 " animatableNodeCount %d\n", r, XrEnumStr(r), ((uint64_t*)props.cacheId.data)[0], ((uint64_t *)props.cacheId.data)[1], props.animatableNodeCount);
 		m.cacheId = props.cacheId;
-		m.animatableNodeCount = props.animatableNodeCount;
 
 		XrInteractionRenderModelSubactionPathInfoEXT sapInfo{ XR_TYPE_INTERACTION_RENDER_MODEL_SUBACTION_PATH_INFO_EXT };
 		uint32_t pathCount = 0;
@@ -237,6 +241,17 @@ void EnumerateInteractionRenderModels(interactionRenderModelsState &state)
 		r = xrCreateRenderModelAssetEXTd(state.session, &assetInfo, &asset);
 		printf("%d(%s) xrCreateRenderModelAssetEXT %p\n", r, XrEnumStr(r), asset);
 
+		XrRenderModelAssetPropertiesGetInfoEXT apGetInfo{ XR_TYPE_RENDER_MODEL_ASSET_PROPERTIES_GET_INFO_EXT };
+		m.assetNodeProps.resize(props.animatableNodeCount);
+		m.nodesState.resize(props.animatableNodeCount);
+		XrRenderModelAssetPropertiesEXT aProps{ XR_TYPE_RENDER_MODEL_ASSET_PROPERTIES_EXT, nullptr, (uint32_t)m.assetNodeProps.size(), m.assetNodeProps.data()};
+		r = xrGetRenderModelAssetPropertiesEXTd(asset, &apGetInfo, &aProps);
+		printf("%d(%s) xrGetRenderModelAssetPropertiesEXT nodePropertyCount %d\n", r, XrEnumStr(r), aProps.nodePropertyCount);
+		for (size_t ni = 0; ni < m.assetNodeProps.size(); ni++)
+		{
+			printf("  %zu: %s\n", ni, m.assetNodeProps[ni].uniqueName);
+		}
+
 		XrRenderModelAssetDataGetInfoEXT assetGetInfo{ XR_TYPE_RENDER_MODEL_ASSET_DATA_GET_INFO_EXT };
 		XrRenderModelAssetDataEXT assetBuffer{ XR_TYPE_RENDER_MODEL_ASSET_DATA_EXT };
 		r = xrGetRenderModelAssetDataEXTd(asset, &assetGetInfo, &assetBuffer);
@@ -270,6 +285,11 @@ void DestroyRenderModels(interactionRenderModelsState &state)
 		printf("%d(%s) xrDestroyRenderModelEXT %p\n", r, XrEnumStr(r), state.renderModels[i].renderModel);
 	}
 	state.renderModels.clear();
+}
+
+glm::mat4 poseToMtx(XrPosef &p)
+{
+	return glm::translate(glm::mat4(1), glm::make_vec3(&p.position.x)) * glm::mat4(glm::make_quat(&p.orientation.x));
 }
 
 int main(int carc, const char** argv)
@@ -420,6 +440,8 @@ int main(int carc, const char** argv)
 		r = xrGetInstanceProcAddr(instance, "xrCreateRenderModelAssetEXT", (PFN_xrVoidFunction *)&xrCreateRenderModelAssetEXTd);
 		r = xrGetInstanceProcAddr(instance, "xrDestroyRenderModelAssetEXT", (PFN_xrVoidFunction *)&xrDestroyRenderModelAssetEXTd);
 		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelAssetDataEXT", (PFN_xrVoidFunction *)&xrGetRenderModelAssetDataEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelAssetPropertiesEXT", (PFN_xrVoidFunction *)&xrGetRenderModelAssetPropertiesEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelStateEXT", (PFN_xrVoidFunction *)&xrGetRenderModelStateEXTd);
 	}
 
 	if (have_EXT_interaction_render_model)
@@ -954,12 +976,22 @@ int main(int carc, const char** argv)
 				xrLocateSpace(gripSpaces[0], localSpace, frameState.predictedDisplayTime, spaceLocations);
 				xrLocateSpace(gripSpaces[1], localSpace, frameState.predictedDisplayTime, spaceLocations + 1);
 
-				std::vector<XrSpaceLocation> renderModelLocations(irmState.renderModels.size());
 				for (size_t i = 0; i < irmState.renderModels.size(); i++)
 				{
-					renderModelLocations[i] = { XR_TYPE_SPACE_LOCATION };
-					r = xrLocateSpace(irmState.renderModels[i].space, localSpace, frameState.predictedDisplayTime, &renderModelLocations[i]);
+					auto &m = irmState.renderModels[i];
+					auto &s = m.location;
+					s = { XR_TYPE_SPACE_LOCATION };
+					r = xrLocateSpace(m.space, localSpace, frameState.predictedDisplayTime, &s);
 					if (r) Log("%d(%s) xrLocateSpace irm %zu\n", r, XrEnumStr(r), i);
+
+					if (s.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT
+						&& s.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT)
+					{
+						XrRenderModelStateGetInfoEXT getInfo{ XR_TYPE_RENDER_MODEL_STATE_GET_INFO_EXT, nullptr, frameState.predictedDisplayTime };
+						XrRenderModelStateEXT rmState{ XR_TYPE_RENDER_MODEL_STATE_EXT, nullptr, (uint32_t)m.nodesState.size(), m.nodesState.data() };
+						r = xrGetRenderModelStateEXTd(m.renderModel, &getInfo, &rmState);
+						if (r) Log("%d(%s) xrGetRenderModelStateEXT irm %zu\n", r, XrEnumStr(r), i);
+					}
 				}
 
 				//RENDER!!!
@@ -976,11 +1008,7 @@ int main(int carc, const char** argv)
 					glClearColor(0.3f, 0.4f, 0.6f, 1.0f);
 					glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-					glm::mat4 vpMtx(1);
-					vpMtx = glm::translate(vpMtx, glm::make_vec3(&views[i].pose.position.x));
-					vpMtx *= glm::mat4(glm::quat(views[i].pose.orientation.w, views[i].pose.orientation.x, views[i].pose.orientation.y, views[i].pose.orientation.z));
-					vpMtx = glm::inverse(vpMtx);
-					vpMtx = FrustumXR(views[i].fov, 0.01f, 1000.0f) * vpMtx;
+					glm::mat4 vpMtx = FrustumXR(views[i].fov, 0.01f, 1000.0f) * glm::inverse(poseToMtx(views[i].pose));
 
 					glm::mat4 mvpMtx = vpMtx;
 
@@ -1000,21 +1028,48 @@ int main(int carc, const char** argv)
 					{
 						if (spaceLocations[h].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
 						{
-							mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::make_vec3(&spaceLocations[h].pose.position.x)) * glm::mat4(glm::make_quat(&spaceLocations[h].pose.orientation.x)), glm::vec3(0.05f));
+							mvpMtx = vpMtx * glm::scale(poseToMtx(spaceLocations[h].pose), glm::vec3(0.05f));
 							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 						}
 					}
 
-					for (size_t rmi = 0; rmi < renderModelLocations.size(); rmi++)
+					for (size_t rmi = 0; rmi < irmState.renderModels.size(); rmi++)
 					{
-						auto &s = renderModelLocations[rmi];
+						auto &m = irmState.renderModels[rmi];
+						auto &s = m.location;
 						if (s.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT
 							&& s.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT)
 						{
-							mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::make_vec3(&s.pose.position.x)) * glm::mat4(glm::make_quat(&s.pose.orientation.x)), glm::vec3(0.04f));
+							glm::mat4 modelMtx = poseToMtx(s.pose);
+							mvpMtx = vpMtx * glm::scale(modelMtx, glm::vec3(0.04f));
 							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
+
+							static glm::mat4 nodeOverrides[8]{
+								glm::mat4(1),
+								glm::translate(glm::mat4(1), glm::vec3(-0.02f,0,0.05f)),
+								glm::translate(glm::mat4(1), glm::vec3(0.005f,0,0.085f)),
+								glm::translate(glm::mat4(1), glm::vec3(0.002f,0,0.06f)),
+								glm::translate(glm::mat4(1), glm::vec3(0.01f,0,0.05f)),
+								glm::translate(glm::mat4(1), glm::vec3(-0.01f,0,0.06f)),
+								glm::translate(glm::mat4(1), glm::vec3(-0.008f,0,0.04f)),
+								glm::translate(glm::mat4(1), glm::vec3(-0.004f,0,0.05f)),
+							};
+
+							for (size_t ni = 0; ni < m.nodesState.size(); ni++)
+							{
+								if (!m.nodesState[ni].isVisible)
+									continue;
+
+								glm::mat4 nodeMtx = glm::mat4(1);
+								if (ni < 8)
+									nodeMtx = nodeOverrides[ni];
+
+								glm::mat4 mvpNode = vpMtx * glm::scale(modelMtx * nodeMtx * poseToMtx(m.nodesState[ni].nodePose), glm::vec3(0.01f));
+								simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpNode[0].x);
+								glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
+							}
 						}
 					}
 
