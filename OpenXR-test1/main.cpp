@@ -148,6 +148,7 @@ bool CheckXrResult(XrResult r, const char *func)
 		Log("%s failed %s\n", func, XrEnumStr(r));
 		return true;
 	}
+	Log("%d(%s) %s\n", r, XrEnumStr(r), func);
 	return false;
 }
 
@@ -360,6 +361,7 @@ int main(int carc, const char** argv)
 	bool have_EXT_render_model = false;
 	bool have_EXT_interaction_render_model = false;
 	bool have_EXT_eye_gaze_interaction = false;
+	bool have_EXT_hand_interaction = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -377,6 +379,8 @@ int main(int carc, const char** argv)
 			have_EXT_interaction_render_model = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_eye_gaze_interaction"))
 			have_EXT_eye_gaze_interaction = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_interaction"))
+			have_EXT_hand_interaction = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -392,6 +396,9 @@ int main(int carc, const char** argv)
 
 	if (have_EXT_eye_gaze_interaction)
 		enabledExts.push_back("XR_EXT_eye_gaze_interaction");
+
+	if (have_EXT_hand_interaction)
+		enabledExts.push_back("XR_EXT_hand_interaction");
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -566,18 +573,18 @@ int main(int carc, const char** argv)
 	CheckXrResult(r, "xrCreateActionSet");
 
 	XrAction handAction;
-	XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO,nullptr,"hand_pose",XR_ACTION_TYPE_POSE_INPUT,2,handsPaths,"Hand pose" };
+	XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO, nullptr, "hand_pose", XR_ACTION_TYPE_POSE_INPUT, 2, handsPaths, "Hand pose" };
 	r = xrCreateAction(actionSet, &actionInfo, &handAction);
-	CheckXrResult(r, "xrCreateAction hand pose");
+	Log("%d(%s) xrCreateAction hand pose %p\n", r, XrEnumStr(r), handAction);
 
 	XrAction clickAction;
 	strcpy(actionInfo.actionName, "click");
 	strcpy(actionInfo.localizedActionName, "Click");
 	actionInfo.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
 	r = xrCreateAction(actionSet, &actionInfo, &clickAction);
-	Log("%d(%s) action click %p\n", r, XrEnumStr(r), clickAction);
+	Log("%d(%s) xrCreateAction click %p\n", r, XrEnumStr(r), clickAction);
 
-	XrActionSuggestedBinding bindings[4];
+	XrActionSuggestedBinding bindings[8];
 	bindings[0].action = handAction;
 	bindings[1].action = handAction;
 	xrStringToPath(instance, "/user/hand/left/input/grip", &bindings[0].binding);
@@ -586,11 +593,36 @@ int main(int carc, const char** argv)
 	bindings[3].action = clickAction;
 	xrStringToPath(instance, "/user/hand/left/input/trigger", &(bindings[2].binding));
 	xrStringToPath(instance, "/user/hand/right/input/trigger", &(bindings[3].binding));
+	uint32_t bindingsCount = 4;
+
+	XrAction pinchAction = XR_NULL_HANDLE;
+	XrAction pokeAction = XR_NULL_HANDLE;
+	if (have_EXT_hand_interaction)
+	{
+		XrActionCreateInfo pinchInfo{ XR_TYPE_ACTION_CREATE_INFO, nullptr, "pinch_pose", XR_ACTION_TYPE_POSE_INPUT, 2, handsPaths, "Pinch pose" };
+		r = xrCreateAction(actionSet, &pinchInfo, &pinchAction);
+		Log("%d(%s) xrCreateAction pinch pose %p\n", r, XrEnumStr(r), pinchAction);
+
+		XrActionCreateInfo pokeInfo{ XR_TYPE_ACTION_CREATE_INFO, nullptr, "poke_pose", XR_ACTION_TYPE_POSE_INPUT, 2, handsPaths, "Poke pose" };
+		r = xrCreateAction(actionSet, &pokeInfo, &pokeAction);
+		Log("%d(%s) xrCreateAction poke pose %p\n", r, XrEnumStr(r), pokeAction);
+
+		bindings[bindingsCount + 0].action = pinchAction;
+		bindings[bindingsCount + 1].action = pinchAction;
+		xrStringToPath(instance, "/user/hand/left/input/pinch_ext", &bindings[bindingsCount + 0].binding);
+		xrStringToPath(instance, "/user/hand/right/input/pinch_ext", &bindings[bindingsCount + 1].binding);
+		bindings[bindingsCount + 2].action = pokeAction;
+		bindings[bindingsCount + 3].action = pokeAction;
+		xrStringToPath(instance, "/user/hand/left/input/poke_ext/pose", &bindings[bindingsCount + 2].binding);
+		xrStringToPath(instance, "/user/hand/right/input/poke_ext/pose", &bindings[bindingsCount + 3].binding);
+		bindingsCount += 4;
+	}
 
 	XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-	suggestedBindings.countSuggestedBindings = 4;
+	suggestedBindings.countSuggestedBindings = bindingsCount;
 	suggestedBindings.suggestedBindings = bindings;
 
+#if 1
 	xrStringToPath(instance, "/interaction_profiles/htc/vive_controller", &suggestedBindings.interactionProfile);
 	r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
 	Log("%d(%s) suggestInteractionProfileBindings htc/vive_controller\n", r, XrEnumStr(r));
@@ -642,6 +674,17 @@ int main(int carc, const char** argv)
 	Log("%d(%s) suggestInteractionProfileBindings khr/simple_controller\n", r, XrEnumStr(r));
 	CheckXrResult(r, "xrSuggestInteractionProfileBindings khr/simple_controller");
 
+#endif
+
+	if (have_EXT_hand_interaction)
+	{
+		xrStringToPath(instance, "/interaction_profiles/ext/hand_interaction_ext", &suggestedBindings.interactionProfile);
+		xrStringToPath(instance, "/user/hand/left/input/aim_activate_ext", &(bindings[2].binding));
+		xrStringToPath(instance, "/user/hand/right/input/aim_activate_ext", &(bindings[3].binding));
+		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
+		Log("%d(%s) suggestInteractionProfileBindings ext/hand_interaction_ext\n", r, XrEnumStr(r));
+	}
+
 	//session
 
 	XrGraphicsRequirementsOpenGLKHR glReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR };
@@ -666,8 +709,8 @@ int main(int carc, const char** argv)
 	memcpy(irmState.topLevelUserPaths, topLevelUserPaths, sizeof(topLevelUserPaths));
 
 	// before xrSyncActions enumerates 0
-	if (have_EXT_interaction_render_model)
-		EnumerateInteractionRenderModels(irmState);
+	//if (have_EXT_interaction_render_model)
+	//	EnumerateInteractionRenderModels(irmState);
 
 	// spaces
 	uint32_t refSpacesCount = 0;
@@ -762,15 +805,36 @@ int main(int carc, const char** argv)
 		}
 	}
 
-	XrSpace gripSpaces[2]{};
-	XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO,nullptr,handAction,handsPaths[0],{{0,0,0,1},{0,0,0}} };
-	r = xrCreateActionSpace(session, &actionSpaceInfo, gripSpaces);
+	XrSpace handSpaces[6]{};
+	uint32_t handSpacesCount = 2;
+	XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO, nullptr, handAction, handsPaths[0], {{0,0,0,1}, {0,0,0}} };
+	r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 0);
 	CheckXrResult(r, "xrCreateActionSpace l");
 	actionSpaceInfo.subactionPath = handsPaths[1];
-	r = xrCreateActionSpace(session, &actionSpaceInfo, gripSpaces+1);
+	r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 1);
 	CheckXrResult(r, "xrCreateActionSpace r");
 
-	XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO,nullptr,1,&actionSet};
+	if (have_EXT_hand_interaction)
+	{
+		actionSpaceInfo.action = pinchAction;
+		actionSpaceInfo.subactionPath = handsPaths[0];
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 2);
+		CheckXrResult(r, "xrCreateActionSpace pinch l");
+		actionSpaceInfo.subactionPath = handsPaths[1];
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 3);
+		CheckXrResult(r, "xrCreateActionSpace pinch r");
+
+		actionSpaceInfo.action = pokeAction;
+		actionSpaceInfo.subactionPath = handsPaths[0];
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 4);
+		CheckXrResult(r, "xrCreateActionSpace poke l");
+		actionSpaceInfo.subactionPath = handsPaths[1];
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 5);
+		CheckXrResult(r, "xrCreateActionSpace poke r");
+		handSpacesCount += 4;
+	}
+
+	XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO, nullptr, 1, &actionSet};
 	r = xrAttachSessionActionSets(session, &attachInfo);
 	CheckXrResult(r, "xrAttachSessionActionSets");
 	Log("%d(%s) attachSessionActionSets\n", r, XrEnumStr(r));
@@ -984,9 +1048,13 @@ int main(int carc, const char** argv)
 					layerProjViews[i].subImage = { viewsData[i].swapchain,viewsData[i].rect, 0 };
 				}
 
-				XrSpaceLocation spaceLocations[2]{ {XR_TYPE_SPACE_LOCATION} ,{XR_TYPE_SPACE_LOCATION} };
-				xrLocateSpace(gripSpaces[0], localSpace, frameState.predictedDisplayTime, spaceLocations);
-				xrLocateSpace(gripSpaces[1], localSpace, frameState.predictedDisplayTime, spaceLocations + 1);
+				XrSpaceLocation spaceLocations[6]{};
+				for (int i = 0; i < handSpacesCount; i++)
+				{
+					spaceLocations[i] = { XR_TYPE_SPACE_LOCATION };
+					r = xrLocateSpace(handSpaces[i], localSpace, frameState.predictedDisplayTime, spaceLocations + i);
+					if (r) Log("%d(%s) xrLocateSpace hand %d\n", r, XrEnumStr(r), i);
+				}
 
 				for (size_t i = 0; i < irmState.renderModels.size(); i++)
 				{
@@ -1036,11 +1104,11 @@ int main(int carc, const char** argv)
 					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 					glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 
-					for (int h = 0; h < 2; h++)
+					for (int h = 0; h < handSpacesCount; h++)
 					{
 						if (spaceLocations[h].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
 						{
-							mvpMtx = vpMtx * glm::scale(poseToMtx(spaceLocations[h].pose), glm::vec3(0.05f));
+							mvpMtx = vpMtx * glm::scale(poseToMtx(spaceLocations[h].pose), glm::vec3(0.05f, 0.05f,0.06f));
 							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 						}
