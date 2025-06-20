@@ -359,6 +359,7 @@ int main(int carc, const char** argv)
 	bool have_EXT_uuid = false;
 	bool have_EXT_render_model = false;
 	bool have_EXT_interaction_render_model = false;
+	bool have_EXT_eye_gaze_interaction = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -374,6 +375,8 @@ int main(int carc, const char** argv)
 			have_EXT_render_model = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_interaction_render_model"))
 			have_EXT_interaction_render_model = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_eye_gaze_interaction"))
+			have_EXT_eye_gaze_interaction = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -386,6 +389,9 @@ int main(int carc, const char** argv)
 		enabledExts.push_back("XR_EXT_render_model");
 		enabledExts.push_back("XR_EXT_interaction_render_model");
 	}
+
+	if (have_EXT_eye_gaze_interaction)
+		enabledExts.push_back("XR_EXT_eye_gaze_interaction");
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -483,13 +489,19 @@ int main(int carc, const char** argv)
 	Log("%d(%s) system XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY %" PRIX64 "\n", r, XrEnumStr(r), systemId);
 
 	XrSystemProperties sysProps{ XR_TYPE_SYSTEM_PROPERTIES };
+	XrSystemEyeGazeInteractionPropertiesEXT egiProps{ XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT };
+	if (have_EXT_eye_gaze_interaction)
+		sysProps.next = &egiProps;
+
 	r = xrGetSystemProperties(instance, systemId, &sysProps);
-	Log("%d(%s) system props: vendor %X, %s", r, XrEnumStr(r), sysProps.vendorId, sysProps.systemName);
-	Log(" graphics: max res %dx%d layers %d",
+	Log("%d(%s) system props: vendor %X, \"%s\"\n", r, XrEnumStr(r), sysProps.vendorId, sysProps.systemName);
+	Log(" graphics: max res %dx%d layers %d\n",
 		sysProps.graphicsProperties.maxSwapchainImageWidth,
 		sysProps.graphicsProperties.maxSwapchainImageHeight,
 		sysProps.graphicsProperties.maxLayerCount);
 	Log(" tracking: orientation %d, position %d\n", sysProps.trackingProperties.orientationTracking, sysProps.trackingProperties.positionTracking);
+	if (have_EXT_eye_gaze_interaction)
+		Log(" XR_EXT_eye_gaze_interaction: %d\n", egiProps.supportsEyeGazeInteraction);
 
 	XrViewConfigurationType viewConfigType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 
