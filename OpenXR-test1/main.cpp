@@ -371,6 +371,7 @@ int main(int carc, const char** argv)
 	bool have_EXT_hand_interaction = false;
 	bool have_EXT_hand_tracking = false;
 	bool have_EXT_hand_tracking_data_source = false;
+	bool have_EXT_hand_joints_motion_range = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -394,6 +395,8 @@ int main(int carc, const char** argv)
 			have_EXT_hand_tracking = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_tracking_data_source"))
 			have_EXT_hand_tracking_data_source = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_joints_motion_range"))
+			have_EXT_hand_joints_motion_range = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -416,6 +419,8 @@ int main(int carc, const char** argv)
 		enabledExts.push_back("XR_EXT_hand_tracking");
 		if (have_EXT_hand_tracking_data_source)
 			enabledExts.push_back("XR_EXT_hand_tracking_data_source");
+		if (have_EXT_hand_joints_motion_range)
+			enabledExts.push_back("XR_EXT_hand_joints_motion_range");
 	}
 
 	XrInstance instance = XR_NULL_HANDLE;
@@ -944,6 +949,8 @@ int main(int carc, const char** argv)
 	bool firstTime = true;
 	bool firstTimeFocused = true;
 
+	XrHandJointsMotionRangeEXT handMotionRange = XR_HAND_JOINTS_MOTION_RANGE_CONFORMING_TO_CONTROLLER_EXT;//XR_HAND_JOINTS_MOTION_RANGE_UNOBSTRUCTED_EXT
+
 	//loop
 	bool shouldClose = false;
 	while (!shouldClose)
@@ -1037,6 +1044,18 @@ int main(int carc, const char** argv)
 		if (glfwWindowShouldClose(window))
 			xrRequestExitSession(session);
 
+		static int lastKeyH = GLFW_RELEASE;
+		int keyH = glfwGetKey(window, GLFW_KEY_H);
+		if (keyH == GLFW_RELEASE && lastKeyH != keyH)
+		{
+			if (handMotionRange == XR_HAND_JOINTS_MOTION_RANGE_CONFORMING_TO_CONTROLLER_EXT)
+				handMotionRange = XR_HAND_JOINTS_MOTION_RANGE_UNOBSTRUCTED_EXT;
+			else
+				handMotionRange = XR_HAND_JOINTS_MOTION_RANGE_CONFORMING_TO_CONTROLLER_EXT;
+			Log("handMotionRange %d\n", handMotionRange);
+		}
+		lastKeyH = keyH;
+
 		if (sessionState == XR_SESSION_STATE_READY || sessionState == XR_SESSION_STATE_SYNCHRONIZED
 			|| sessionState == XR_SESSION_STATE_VISIBLE || sessionState == XR_SESSION_STATE_FOCUSED)
 		{
@@ -1123,6 +1142,11 @@ int main(int carc, const char** argv)
 						if (!handTrackers[hi])
 							continue;
 						XrHandJointsLocateInfoEXT hjlInfo{ XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT, nullptr, localSpace, frameState.predictedDisplayTime };
+						XrHandJointsMotionRangeInfoEXT hjmrInfo{ XR_TYPE_HAND_JOINTS_MOTION_RANGE_INFO_EXT, nullptr, handMotionRange };
+						if (have_EXT_hand_joints_motion_range)
+						{
+							hjlInfo.next = &hjmrInfo;
+						}
 						hjLocs[hi] = { XR_TYPE_HAND_JOINT_LOCATIONS_EXT };
 						hjLocs[hi].jointCount = XR_HAND_JOINT_COUNT_EXT;
 						hjLocs[hi].jointLocations = handJoints[hi];
