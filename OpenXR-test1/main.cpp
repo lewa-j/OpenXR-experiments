@@ -46,6 +46,7 @@ XR_ENUM_STR(XrSessionState)
 XR_ENUM_STR(XrViewConfigurationType)
 XR_ENUM_STR(XrEnvironmentBlendMode)
 XR_ENUM_STR(XrReferenceSpaceType)
+XR_ENUM_STR(XrHandTrackingDataSourceEXT)
 
 const char* glfmt_to_str(int64_t f);
 
@@ -369,6 +370,7 @@ int main(int carc, const char** argv)
 	bool have_EXT_eye_gaze_interaction = false;
 	bool have_EXT_hand_interaction = false;
 	bool have_EXT_hand_tracking = false;
+	bool have_EXT_hand_tracking_data_source = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -390,6 +392,8 @@ int main(int carc, const char** argv)
 			have_EXT_hand_interaction = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_tracking"))
 			have_EXT_hand_tracking = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_tracking_data_source"))
+			have_EXT_hand_tracking_data_source = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -408,7 +412,11 @@ int main(int carc, const char** argv)
 	if (have_EXT_hand_interaction)
 		enabledExts.push_back("XR_EXT_hand_interaction");
 	if (have_EXT_hand_tracking)
+	{
 		enabledExts.push_back("XR_EXT_hand_tracking");
+		if (have_EXT_hand_tracking_data_source)
+			enabledExts.push_back("XR_EXT_hand_tracking_data_source");
+	}
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -732,10 +740,20 @@ int main(int carc, const char** argv)
 	}
 	Log("%d(%s) session %p\n", r, XrEnumStr(r), session);
 
+	bool forceHandTrackingUnobstructed = false;
+
 	XrHandTrackerEXT handTrackers[2]{ XR_NULL_HANDLE, XR_NULL_HANDLE };
 	if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
 	{
 		XrHandTrackerCreateInfoEXT htInfo{ XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT, nullptr, XR_HAND_LEFT_EXT, XR_HAND_JOINT_SET_DEFAULT_EXT };
+		XrHandTrackingDataSourceEXT htds[2]{ XR_HAND_TRACKING_DATA_SOURCE_UNOBSTRUCTED_EXT, XR_HAND_TRACKING_DATA_SOURCE_CONTROLLER_EXT };
+		XrHandTrackingDataSourceInfoEXT htdsInfo{ XR_TYPE_HAND_TRACKING_DATA_SOURCE_INFO_EXT, nullptr, 2, htds };
+		if (have_EXT_hand_tracking_data_source)
+		{
+			if (forceHandTrackingUnobstructed)
+				htdsInfo.requestedDataSourceCount = 1;
+			htInfo.next = &htdsInfo;
+		}
 		r = xrCreateHandTrackerEXTd(session, &htInfo, handTrackers + 0);
 		Log("%d(%s) xrCreateHandTrackerEXT left %p\n", r, XrEnumStr(r), handTrackers[0]);
 		htInfo.hand = XR_HAND_RIGHT_EXT;
@@ -1075,7 +1093,7 @@ int main(int carc, const char** argv)
 						return r;
 				}
 
-				XrViewLocateInfo viewLocateInfo{XR_TYPE_VIEW_LOCATE_INFO,nullptr,viewConfigType,frameState.predictedDisplayTime, localSpace };
+				XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO,nullptr,viewConfigType,frameState.predictedDisplayTime, localSpace };
 				XrViewState viewState{ XR_TYPE_VIEW_STATE };
 				uint32_t viewCount = 0;
 				r = xrLocateViews(session, &viewLocateInfo, &viewState, (uint32_t)views.size(), &viewCount, views.data());
@@ -1096,17 +1114,33 @@ int main(int carc, const char** argv)
 				}
 
 				XrHandJointLocationEXT handJoints[2][XR_HAND_JOINT_COUNT_EXT];
-				XrHandJointLocationsEXT hjLocs[2];
+				XrHandJointLocationsEXT hjLocs[2]{};
+				XrHandTrackingDataSourceStateEXT htdsState[2]{};
 				if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
 				{
 					for (size_t hi = 0; hi < std::size(handTrackers); hi++)
 					{
+						if (!handTrackers[hi])
+							continue;
 						XrHandJointsLocateInfoEXT hjlInfo{ XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT, nullptr, localSpace, frameState.predictedDisplayTime };
 						hjLocs[hi] = { XR_TYPE_HAND_JOINT_LOCATIONS_EXT };
 						hjLocs[hi].jointCount = XR_HAND_JOINT_COUNT_EXT;
 						hjLocs[hi].jointLocations = handJoints[hi];
+						if (have_EXT_hand_tracking_data_source)
+						{
+							htdsState[hi] = { XR_TYPE_HAND_TRACKING_DATA_SOURCE_STATE_EXT };
+							hjLocs[hi].next = &htdsState[hi];
+						}
 						r = xrLocateHandJointsEXTd(handTrackers[hi], &hjlInfo, hjLocs + hi);
 						if (r) Log("%d(%s) xrLocateHandJointsEXT hand %zu\n", r, XrEnumStr(r), hi);
+
+						if (have_EXT_hand_tracking_data_source)
+						{
+							static int lastDataSource[2]{ 0, 0 };
+							if (lastDataSource[hi] != htdsState[hi].dataSource)
+								printf("hand %zu new tracking data source %d(%s)\n", hi, htdsState[hi].dataSource, XrEnumStr(htdsState[hi].dataSource));
+							lastDataSource[hi] = htdsState[hi].dataSource;
+						}
 					}
 				}
 
@@ -1158,15 +1192,7 @@ int main(int carc, const char** argv)
 					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 					glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 
-					for (int h = 0; h < handSpacesCount; h++)
-					{
-						if (spaceLocations[h].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
-						{
-							mvpMtx = vpMtx * glm::scale(poseToMtx(spaceLocations[h].pose), glm::vec3(0.05f, 0.05f,0.06f));
-							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
-							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
-						}
-					}
+					bool drawControllers = true;
 
 					if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
 					{
@@ -1178,17 +1204,33 @@ int main(int carc, const char** argv)
 							for (int ji = 0; ji < hjLocs[hi].jointCount; ji++)
 							{
 								auto &joint = hjLocs[hi].jointLocations[ji];
-								
+
 								const glm::mat4 modelMtx = poseToMtx(joint.pose);
 								mvpMtx = vpMtx * glm::scale(modelMtx, glm::vec3(joint.radius));
 								simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 								glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 							}
+							drawControllers = false;
+						}
+					}
+
+					for (int h = 0; h < handSpacesCount; h++)
+					{
+						if (!drawControllers)
+							break;
+						if (spaceLocations[h].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
+						{
+							mvpMtx = vpMtx * glm::scale(poseToMtx(spaceLocations[h].pose), glm::vec3(0.05f, 0.05f,0.06f));
+							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
+							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 						}
 					}
 
 					for (size_t rmi = 0; rmi < irmState.renderModels.size(); rmi++)
 					{
+						if (!drawControllers)
+							break;
+
 						auto &m = irmState.renderModels[rmi];
 						auto &s = m.location;
 						if (s.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT
