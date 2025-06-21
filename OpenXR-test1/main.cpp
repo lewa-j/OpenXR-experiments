@@ -57,9 +57,12 @@ PFN_xrDestroyInstance xrDestroyInstance;
 PFN_xrPollEvent xrPollEvent;
 */
 
+//XR_EXT_debug_utils
 PFN_xrCreateDebugUtilsMessengerEXT xrCreateDebugUtilsMessengerEXTd;
 PFN_xrDestroyDebugUtilsMessengerEXT xrDestroyDebugUtilsMessengerEXTd;
+//XR_KHR_opengl_enable
 PFN_xrGetOpenGLGraphicsRequirementsKHR xrGetOpenGLGraphicsRequirementsKHRd;
+//XR_EXT_render_model
 PFN_xrCreateRenderModelEXT xrCreateRenderModelEXTd;
 PFN_xrDestroyRenderModelEXT xrDestroyRenderModelEXTd;
 PFN_xrGetRenderModelPropertiesEXT xrGetRenderModelPropertiesEXTd;
@@ -69,13 +72,16 @@ PFN_xrDestroyRenderModelAssetEXT xrDestroyRenderModelAssetEXTd;
 PFN_xrGetRenderModelAssetDataEXT xrGetRenderModelAssetDataEXTd;
 PFN_xrGetRenderModelAssetPropertiesEXT xrGetRenderModelAssetPropertiesEXTd;
 PFN_xrGetRenderModelStateEXT xrGetRenderModelStateEXTd;
+//XR_EXT_interaction_render_model
 PFN_xrEnumerateInteractionRenderModelIdsEXT xrEnumerateInteractionRenderModelIdsEXTd;
 PFN_xrEnumerateRenderModelSubactionPathsEXT xrEnumerateRenderModelSubactionPathsEXTd;
 PFN_xrGetRenderModelPoseTopLevelUserPathEXT xrGetRenderModelPoseTopLevelUserPathEXTd;
+//XR_EXT_hand_tracking
+PFN_xrCreateHandTrackerEXT xrCreateHandTrackerEXTd;
+PFN_xrDestroyHandTrackerEXT xrDestroyHandTrackerEXTd;
+PFN_xrLocateHandJointsEXT xrLocateHandJointsEXTd;
 
 #define Log printf
-
-
 
 XrBool32 DebugMessengerCallback(XrDebugUtilsMessageSeverityFlagsEXT messageSeverity, XrDebugUtilsMessageTypeFlagsEXT messageTypes, const XrDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData)
 {
@@ -362,6 +368,7 @@ int main(int carc, const char** argv)
 	bool have_EXT_interaction_render_model = false;
 	bool have_EXT_eye_gaze_interaction = false;
 	bool have_EXT_hand_interaction = false;
+	bool have_EXT_hand_tracking = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -381,6 +388,8 @@ int main(int carc, const char** argv)
 			have_EXT_eye_gaze_interaction = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_interaction"))
 			have_EXT_hand_interaction = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_tracking"))
+			have_EXT_hand_tracking = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -396,9 +405,10 @@ int main(int carc, const char** argv)
 
 	if (have_EXT_eye_gaze_interaction)
 		enabledExts.push_back("XR_EXT_eye_gaze_interaction");
-
 	if (have_EXT_hand_interaction)
 		enabledExts.push_back("XR_EXT_hand_interaction");
+	if (have_EXT_hand_tracking)
+		enabledExts.push_back("XR_EXT_hand_tracking");
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -464,6 +474,13 @@ int main(int carc, const char** argv)
 		r = xrGetInstanceProcAddr(instance, "xrGetRenderModelPoseTopLevelUserPathEXT", (PFN_xrVoidFunction*)&xrGetRenderModelPoseTopLevelUserPathEXTd);
 	}
 
+	if (have_EXT_hand_tracking)
+	{
+		r = xrGetInstanceProcAddr(instance, "xrCreateHandTrackerEXT", (PFN_xrVoidFunction*)&xrCreateHandTrackerEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrDestroyHandTrackerEXT", (PFN_xrVoidFunction*)&xrDestroyHandTrackerEXTd);
+		r = xrGetInstanceProcAddr(instance, "xrLocateHandJointsEXT", (PFN_xrVoidFunction*)&xrLocateHandJointsEXTd);
+	}
+
 	XrDebugUtilsMessengerEXT debugMessenger = XR_NULL_HANDLE;
 
 	if (have_EXT_debug_utils)
@@ -496,9 +513,19 @@ int main(int carc, const char** argv)
 	Log("%d(%s) system XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY %" PRIX64 "\n", r, XrEnumStr(r), systemId);
 
 	XrSystemProperties sysProps{ XR_TYPE_SYSTEM_PROPERTIES };
-	XrSystemEyeGazeInteractionPropertiesEXT egiProps{ XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT };
+	void **ppNext = &sysProps.next;
+	XrSystemEyeGazeInteractionPropertiesEXT segiProps{ XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT };
+	XrSystemHandTrackingPropertiesEXT shtProps{ XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT };
 	if (have_EXT_eye_gaze_interaction)
-		sysProps.next = &egiProps;
+	{
+		*ppNext = &segiProps;
+		ppNext = &segiProps.next;
+	}
+	if (have_EXT_hand_tracking)
+	{
+		*ppNext = &shtProps;
+		ppNext = &shtProps.next;
+	}
 
 	r = xrGetSystemProperties(instance, systemId, &sysProps);
 	Log("%d(%s) system props: vendor %X, \"%s\"\n", r, XrEnumStr(r), sysProps.vendorId, sysProps.systemName);
@@ -508,7 +535,9 @@ int main(int carc, const char** argv)
 		sysProps.graphicsProperties.maxLayerCount);
 	Log(" tracking: orientation %d, position %d\n", sysProps.trackingProperties.orientationTracking, sysProps.trackingProperties.positionTracking);
 	if (have_EXT_eye_gaze_interaction)
-		Log(" XR_EXT_eye_gaze_interaction: %d\n", egiProps.supportsEyeGazeInteraction);
+		Log(" supportsEyeGazeInteraction: %d\n", segiProps.supportsEyeGazeInteraction);
+	if (have_EXT_hand_tracking)
+		Log(" supportsHandTracking: %d\n", shtProps.supportsHandTracking);
 
 	XrViewConfigurationType viewConfigType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 
@@ -701,6 +730,14 @@ int main(int carc, const char** argv)
 		return -1;
 	}
 	Log("%d(%s) session %p\n", r, XrEnumStr(r), session);
+
+	XrHandTrackerEXT handTrackers[2]{ XR_NULL_HANDLE, XR_NULL_HANDLE };
+	XrHandTrackerCreateInfoEXT htInfo{ XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT, nullptr, XR_HAND_LEFT_EXT, XR_HAND_JOINT_SET_DEFAULT_EXT };
+	r = xrCreateHandTrackerEXTd(session, &htInfo, handTrackers + 0);
+	Log("%d(%s) xrCreateHandTrackerEXT left %p\n", r, XrEnumStr(r), handTrackers[0]);
+	htInfo.hand = XR_HAND_RIGHT_EXT;
+	r = xrCreateHandTrackerEXTd(session, &htInfo, handTrackers + 1);
+	Log("%d(%s) xrCreateHandTrackerEXT right %p\n", r, XrEnumStr(r), handTrackers[1]);
 
 	interactionRenderModelsState irmState;
 	irmState.instance = instance;
@@ -1056,6 +1093,21 @@ int main(int carc, const char** argv)
 					if (r) Log("%d(%s) xrLocateSpace hand %d\n", r, XrEnumStr(r), i);
 				}
 
+				XrHandJointLocationEXT handJoints[2][XR_HAND_JOINT_COUNT_EXT];
+				XrHandJointLocationsEXT hjLocs[2];
+				if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
+				{
+					for (size_t hi = 0; hi < std::size(handTrackers); hi++)
+					{
+						XrHandJointsLocateInfoEXT hjlInfo{ XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT, nullptr, localSpace, frameState.predictedDisplayTime };
+						hjLocs[hi] = { XR_TYPE_HAND_JOINT_LOCATIONS_EXT };
+						hjLocs[hi].jointCount = XR_HAND_JOINT_COUNT_EXT;
+						hjLocs[hi].jointLocations = handJoints[hi];
+						r = xrLocateHandJointsEXTd(handTrackers[hi], &hjlInfo, hjLocs + hi);
+						if (r) Log("%d(%s) xrLocateHandJointsEXT hand %zu\n", r, XrEnumStr(r), hi);
+					}
+				}
+
 				for (size_t i = 0; i < irmState.renderModels.size(); i++)
 				{
 					auto &m = irmState.renderModels[i];
@@ -1114,6 +1166,25 @@ int main(int carc, const char** argv)
 						}
 					}
 
+					if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
+					{
+						for (size_t hi = 0; hi < std::size(handTrackers); hi++)
+						{
+							if (!hjLocs[hi].isActive)
+								continue;
+
+							for (int ji = 0; ji < hjLocs[hi].jointCount; ji++)
+							{
+								auto &joint = hjLocs[hi].jointLocations[ji];
+								
+								const glm::mat4 modelMtx = poseToMtx(joint.pose);
+								mvpMtx = vpMtx * glm::scale(modelMtx, glm::vec3(joint.radius));
+								simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
+								glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
+							}
+						}
+					}
+
 					for (size_t rmi = 0; rmi < irmState.renderModels.size(); rmi++)
 					{
 						auto &m = irmState.renderModels[rmi];
@@ -1121,7 +1192,7 @@ int main(int carc, const char** argv)
 						if (s.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT
 							&& s.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT)
 						{
-							glm::mat4 modelMtx = poseToMtx(s.pose);
+							const glm::mat4 modelMtx = poseToMtx(s.pose);
 							mvpMtx = vpMtx * glm::scale(modelMtx, glm::vec3(0.04f));
 							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
@@ -1185,6 +1256,15 @@ int main(int carc, const char** argv)
 	if (have_EXT_interaction_render_model)
 		DestroyRenderModels(irmState);
 
+	if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
+	{
+		for (auto ht : handTrackers)
+		{
+			r = xrDestroyHandTrackerEXTd(ht);
+			printf("%d(%s) xrDestroyHandTrackerEXT %p\n", r, XrEnumStr(r), ht);
+		}
+	}
+
 	for (size_t i = 0; i < cfgViews.size(); i++)
 	{
 		xrDestroySwapchain(viewsData[i].swapchain);
@@ -1199,7 +1279,6 @@ int main(int carc, const char** argv)
 	printf("Shutting down\n");
 	return 0;
 }
-
 
 const char* glfmt_to_str(int64_t f)
 {
