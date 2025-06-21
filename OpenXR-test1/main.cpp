@@ -724,7 +724,8 @@ int main(int carc, const char** argv)
 	XrGraphicsBindingOpenGLWin32KHR glWin32Binding{ XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR, nullptr, dc, glrc };
 	XrSessionCreateInfo sessionInfo{ XR_TYPE_SESSION_CREATE_INFO, &glWin32Binding, 0, systemId };
 	r = xrCreateSession(instance, &sessionInfo, &session);
-	if (XR_FAILED(r)) {
+	if (XR_FAILED(r))
+	{
 		CheckXrResult(r, "xrCreateSession");
 		xrDestroyInstance(instance);
 		return -1;
@@ -732,22 +733,27 @@ int main(int carc, const char** argv)
 	Log("%d(%s) session %p\n", r, XrEnumStr(r), session);
 
 	XrHandTrackerEXT handTrackers[2]{ XR_NULL_HANDLE, XR_NULL_HANDLE };
-	XrHandTrackerCreateInfoEXT htInfo{ XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT, nullptr, XR_HAND_LEFT_EXT, XR_HAND_JOINT_SET_DEFAULT_EXT };
-	r = xrCreateHandTrackerEXTd(session, &htInfo, handTrackers + 0);
-	Log("%d(%s) xrCreateHandTrackerEXT left %p\n", r, XrEnumStr(r), handTrackers[0]);
-	htInfo.hand = XR_HAND_RIGHT_EXT;
-	r = xrCreateHandTrackerEXTd(session, &htInfo, handTrackers + 1);
-	Log("%d(%s) xrCreateHandTrackerEXT right %p\n", r, XrEnumStr(r), handTrackers[1]);
+	if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
+	{
+		XrHandTrackerCreateInfoEXT htInfo{ XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT, nullptr, XR_HAND_LEFT_EXT, XR_HAND_JOINT_SET_DEFAULT_EXT };
+		r = xrCreateHandTrackerEXTd(session, &htInfo, handTrackers + 0);
+		Log("%d(%s) xrCreateHandTrackerEXT left %p\n", r, XrEnumStr(r), handTrackers[0]);
+		htInfo.hand = XR_HAND_RIGHT_EXT;
+		r = xrCreateHandTrackerEXTd(session, &htInfo, handTrackers + 1);
+		Log("%d(%s) xrCreateHandTrackerEXT right %p\n", r, XrEnumStr(r), handTrackers[1]);
+	}
 
 	interactionRenderModelsState irmState;
-	irmState.instance = instance;
-	irmState.session = session;
-	static_assert(sizeof(irmState.topLevelUserPaths) == sizeof(topLevelUserPaths), "topLevelUserPaths size");
-	memcpy(irmState.topLevelUserPaths, topLevelUserPaths, sizeof(topLevelUserPaths));
+	if (have_EXT_interaction_render_model)
+	{
+		irmState.instance = instance;
+		irmState.session = session;
+		static_assert(sizeof(irmState.topLevelUserPaths) == sizeof(topLevelUserPaths), "topLevelUserPaths size");
+		memcpy(irmState.topLevelUserPaths, topLevelUserPaths, sizeof(topLevelUserPaths));
 
-	// before xrSyncActions enumerates 0
-	//if (have_EXT_interaction_render_model)
-	//	EnumerateInteractionRenderModels(irmState);
+		// before xrSyncActions enumerates 0
+		//	EnumerateInteractionRenderModels(irmState);
+	}
 
 	// spaces
 	uint32_t refSpacesCount = 0;
@@ -770,11 +776,7 @@ int main(int carc, const char** argv)
 	refSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
 	refSpaceCreateInfo.poseInReferenceSpace = { {0,0,0,1},{0,0,0} };
 	r = xrCreateReferenceSpace(session, &refSpaceCreateInfo, &localSpace);
-	if (XR_FAILED(r))
-	{
-		printf("xrCreateReferenceSpace failed %s\n", XrEnumStr(r));
-	}
-	Log("%d(%s) create local ref space %p\n", r, XrEnumStr(r), localSpace);
+	Log("%d(%s) xrCreateReferenceSpace local %p\n", r, XrEnumStr(r), localSpace);
 
 	// swapchain
 
