@@ -163,7 +163,7 @@ struct interactionRenderModelsState
 {
 	XrInstance instance;
 	XrSession session;
-	XrPath topLevelUserPaths[5];
+	const std::vector<XrPath> &topLevelUserPaths;
 	std::vector<XrRenderModelIdEXT> renderModelIds;
 
 	struct model
@@ -232,8 +232,8 @@ void EnumerateInteractionRenderModels(interactionRenderModelsState &state)
 		}
 
 		XrInteractionRenderModelTopLevelUserPathGetInfoEXT tlupGetInfo{ XR_TYPE_INTERACTION_RENDER_MODEL_TOP_LEVEL_USER_PATH_GET_INFO_EXT };
-		tlupGetInfo.topLevelUserPathCount = std::size(state.topLevelUserPaths);
-		tlupGetInfo.topLevelUserPaths = state.topLevelUserPaths;
+		tlupGetInfo.topLevelUserPathCount = (uint32_t)state.topLevelUserPaths.size();
+		tlupGetInfo.topLevelUserPaths = state.topLevelUserPaths.data();
 		r = xrGetRenderModelPoseTopLevelUserPathEXTd(m.renderModel, &tlupGetInfo, &m.topLevelUserPath);
 		char pathStr[XR_MAX_PATH_LENGTH]{ 0 };
 		uint32_t count = 0;
@@ -367,11 +367,16 @@ int main(int carc, const char** argv)
 	bool have_EXT_uuid = false;
 	bool have_EXT_render_model = false;
 	bool have_EXT_interaction_render_model = false;
-	bool have_EXT_eye_gaze_interaction = false;
-	bool have_EXT_hand_interaction = false;
 	bool have_EXT_hand_tracking = false;
 	bool have_EXT_hand_tracking_data_source = false;
 	bool have_EXT_hand_joints_motion_range = false;
+	bool have_EXT_palm_pose = false;
+	bool have_EXT_eye_gaze_interaction = false;
+	bool have_EXT_hand_interaction = false;
+	bool have_EXT_hp_mixed_reality_controller = false;
+	bool have_HTC_vive_cosmos_controller_interaction = false;
+	bool have_HTC_vive_focus3_controller_interaction = false;
+	bool have_HTC_vive_wrist_tracker_interaction = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -397,6 +402,16 @@ int main(int carc, const char** argv)
 			have_EXT_hand_tracking_data_source = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_hand_joints_motion_range"))
 			have_EXT_hand_joints_motion_range = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_hp_mixed_reality_controller"))
+			have_EXT_hp_mixed_reality_controller = true;
+		else if (!strcmp(exts[i].extensionName, "XR_HTC_vive_cosmos_controller_interaction"))
+			have_HTC_vive_cosmos_controller_interaction = true;
+		else if (!strcmp(exts[i].extensionName, "XR_HTC_vive_focus3_controller_interaction"))
+			have_HTC_vive_focus3_controller_interaction = true;
+		else if (!strcmp(exts[i].extensionName, "XR_HTC_vive_wrist_tracker_interaction"))
+			have_HTC_vive_wrist_tracker_interaction = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_palm_pose"))
+			have_EXT_palm_pose = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -422,6 +437,17 @@ int main(int carc, const char** argv)
 		if (have_EXT_hand_joints_motion_range)
 			enabledExts.push_back("XR_EXT_hand_joints_motion_range");
 	}
+	if (have_EXT_hp_mixed_reality_controller)
+		enabledExts.push_back("XR_EXT_hp_mixed_reality_controller");
+	if (have_HTC_vive_cosmos_controller_interaction)
+		enabledExts.push_back("XR_HTC_vive_cosmos_controller_interaction");
+	if (have_HTC_vive_focus3_controller_interaction)
+		enabledExts.push_back("XR_HTC_vive_focus3_controller_interaction");
+	if (have_HTC_vive_wrist_tracker_interaction)
+		enabledExts.push_back("XR_HTC_vive_wrist_tracker_interaction");
+
+	if (have_EXT_palm_pose)
+		enabledExts.push_back("XR_EXT_palm_pose");
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -435,8 +461,10 @@ int main(int carc, const char** argv)
 	instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_1;
 	r = xrCreateInstance(&instInfo, &instance);
 	Log("%d(%s) create instance 1.1 %p\n", r, XrEnumStr(r), instance);
+	bool have_xr11 = true;
 	if (r == XR_ERROR_API_VERSION_UNSUPPORTED)
 	{
+		have_xr11 = false;
 		instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_0;
 
 		if (have_EXT_interaction_render_model && have_EXT_render_model && have_EXT_uuid)
@@ -604,7 +632,9 @@ int main(int carc, const char** argv)
 	r = xrStringToPath(instance, "/user/hand/left", &handsPaths[0]);
 	r = xrStringToPath(instance, "/user/hand/right", &handsPaths[1]);
 
-	XrPath topLevelUserPaths[5]{ handsPaths[0],handsPaths[1] };
+	std::vector<XrPath> topLevelUserPaths(5);
+	topLevelUserPaths[0] = handsPaths[0];
+	topLevelUserPaths[1] = handsPaths[1];
 	r = xrStringToPath(instance, "/user/head", &topLevelUserPaths[2]);
 	r = xrStringToPath(instance, "/user/gamepad", &topLevelUserPaths[3]);
 	r = xrStringToPath(instance, "/user/treadmill", &topLevelUserPaths[4]);
@@ -614,10 +644,10 @@ int main(int carc, const char** argv)
 	r = xrCreateActionSet(instance, &actionSetInfo, &actionSet);
 	CheckXrResult(r, "xrCreateActionSet");
 
-	XrAction handAction;
+	XrAction gripAction;
 	XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO, nullptr, "hand_pose", XR_ACTION_TYPE_POSE_INPUT, 2, handsPaths, "Hand pose" };
-	r = xrCreateAction(actionSet, &actionInfo, &handAction);
-	Log("%d(%s) xrCreateAction hand pose %p\n", r, XrEnumStr(r), handAction);
+	r = xrCreateAction(actionSet, &actionInfo, &gripAction);
+	Log("%d(%s) xrCreateAction hand grip pose %p\n", r, XrEnumStr(r), gripAction);
 
 	XrAction clickAction;
 	strcpy(actionInfo.actionName, "click");
@@ -626,9 +656,9 @@ int main(int carc, const char** argv)
 	r = xrCreateAction(actionSet, &actionInfo, &clickAction);
 	Log("%d(%s) xrCreateAction click %p\n", r, XrEnumStr(r), clickAction);
 
-	XrActionSuggestedBinding bindings[8];
-	bindings[0].action = handAction;
-	bindings[1].action = handAction;
+	XrActionSuggestedBinding bindings[10];
+	bindings[0].action = gripAction;
+	bindings[1].action = gripAction;
 	xrStringToPath(instance, "/user/hand/left/input/grip", &bindings[0].binding);
 	xrStringToPath(instance, "/user/hand/right/input/grip", &bindings[1].binding);
 	bindings[2].action = clickAction;
@@ -660,71 +690,98 @@ int main(int carc, const char** argv)
 		bindingsCount += 4;
 	}
 
+	XrAction palmAction = XR_NULL_HANDLE;
+	if (have_xr11 || have_EXT_palm_pose)
+	{
+		XrActionCreateInfo palmInfo{ XR_TYPE_ACTION_CREATE_INFO, nullptr, "palm_pose", XR_ACTION_TYPE_POSE_INPUT, 2, handsPaths, "Palm pose" };
+		r = xrCreateAction(actionSet, &palmInfo, &palmAction);
+		Log("%d(%s) xrCreateAction palm pose %p\n", r, XrEnumStr(r), palmAction);
+
+		bindings[bindingsCount + 0].action = palmAction;
+		bindings[bindingsCount + 1].action = palmAction;
+		if (have_xr11)
+		{
+			xrStringToPath(instance, "/user/hand/left/input/grip_surface", &bindings[bindingsCount + 0].binding);
+			xrStringToPath(instance, "/user/hand/right/input/grip_surface", &bindings[bindingsCount + 1].binding);
+		}
+		else
+		{
+			xrStringToPath(instance, "/user/hand/left/input/palm_ext", &bindings[bindingsCount + 0].binding);
+			xrStringToPath(instance, "/user/hand/right/input/palm_ext", &bindings[bindingsCount + 1].binding);
+		}
+		bindingsCount += 2;
+	}
+
 	XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
 	suggestedBindings.countSuggestedBindings = bindingsCount;
 	suggestedBindings.suggestedBindings = bindings;
 
+	auto suggestBindings = [&](const char *path)
+		{
+			xrStringToPath(instance, path, &suggestedBindings.interactionProfile);
+			r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
+			Log("%d(%s) suggestBindings %s\n", r, XrEnumStr(r), path);
+		};
+
 #if 1
-	xrStringToPath(instance, "/interaction_profiles/htc/vive_controller", &suggestedBindings.interactionProfile);
-	r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-	Log("%d(%s) suggestInteractionProfileBindings htc/vive_controller\n", r, XrEnumStr(r));
-	CheckXrResult(r, "xrSuggestInteractionProfileBindings vive");
+	suggestBindings("/interaction_profiles/htc/vive_controller");
+	if (have_xr11 || have_HTC_vive_cosmos_controller_interaction)
+		suggestBindings("/interaction_profiles/htc/vive_cosmos_controller");
+	if (have_xr11 || have_HTC_vive_focus3_controller_interaction)
+		suggestBindings("/interaction_profiles/htc/vive_focus3_controller");
+	suggestBindings("/interaction_profiles/valve/index_controller");
+	suggestBindings("/interaction_profiles/microsoft/motion_controller");
+	if (have_xr11 || have_EXT_hp_mixed_reality_controller)
+		suggestBindings("/interaction_profiles/hp/mixed_reality_controller");
 
+	//if (have_xr11)
 	{
-		xrStringToPath(instance, "/interaction_profiles/microsoft/motion_controller", &suggestedBindings.interactionProfile);
-		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d(%s) suggestInteractionProfileBindings microsoft/motion_controller\n", r, XrEnumStr(r));
-
 		// 1.1 standard
-
-		xrStringToPath(instance, "/interaction_profiles/bytedance/pico_neo3_controller", &suggestedBindings.interactionProfile);
-		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d(%s) suggestInteractionProfileBindings bytedance/pico_neo3_controller\n", r, XrEnumStr(r));
-
-		xrStringToPath(instance, "/interaction_profiles/bytedance/pico4_controller", &suggestedBindings.interactionProfile);
-		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d(%s) suggestInteractionProfileBindings bytedance/pico4_controller\n", r, XrEnumStr(r));
-
-		//non standart
-		xrStringToPath(instance, "/interaction_profiles/pico/neo3_controller", &suggestedBindings.interactionProfile);
-		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d(%s) suggestInteractionProfileBindings pico/neo3_controller\n", r, XrEnumStr(r));
-
-		//if (xr_11)
-		{
-			xrStringToPath(instance, "/interaction_profiles/meta/touch_controller_quest_2", &suggestedBindings.interactionProfile);
-			r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-			Log("%d(%s) suggestInteractionProfileBindings meta/touch_controller_quest_2\n", r, XrEnumStr(r));
-		}
-		//else
-		{
-			xrStringToPath(instance, "/interaction_profiles/oculus/touch_controller", &suggestedBindings.interactionProfile);
-			r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-			Log("%d(%s) suggestInteractionProfileBindings oculus/touch_controller\n", r, XrEnumStr(r));
-
-		}
-
-		xrStringToPath(instance, "/interaction_profiles/valve/index_controller", &suggestedBindings.interactionProfile);
-		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d(%s) suggestInteractionProfileBindings valve/index_controller\n", r, XrEnumStr(r));
+		suggestBindings("/interaction_profiles/bytedance/pico_neo3_controller");
+		suggestBindings("/interaction_profiles/bytedance/pico4_controller");
 	}
 
-	xrStringToPath(instance, "/interaction_profiles/khr/simple_controller", &suggestedBindings.interactionProfile);
+	// non standart
+	suggestBindings("/interaction_profiles/pico/neo3_controller");
+
+	if (have_xr11)
+	{
+		suggestBindings("/interaction_profiles/meta/touch_controller_quest_2");
+	}
+	suggestBindings("/interaction_profiles/oculus/touch_controller");
+
 	xrStringToPath(instance, "/user/hand/left/input/select", &(bindings[2].binding));
 	xrStringToPath(instance, "/user/hand/right/input/select", &(bindings[3].binding));
-	r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-	Log("%d(%s) suggestInteractionProfileBindings khr/simple_controller\n", r, XrEnumStr(r));
-	CheckXrResult(r, "xrSuggestInteractionProfileBindings khr/simple_controller");
-
+	suggestBindings("/interaction_profiles/khr/simple_controller");
 #endif
 
 	if (have_EXT_hand_interaction)
 	{
-		xrStringToPath(instance, "/interaction_profiles/ext/hand_interaction_ext", &suggestedBindings.interactionProfile);
 		xrStringToPath(instance, "/user/hand/left/input/aim_activate_ext", &(bindings[2].binding));
 		xrStringToPath(instance, "/user/hand/right/input/aim_activate_ext", &(bindings[3].binding));
-		r = xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
-		Log("%d(%s) suggestInteractionProfileBindings ext/hand_interaction_ext\n", r, XrEnumStr(r));
+		suggestBindings("/interaction_profiles/ext/hand_interaction_ext");
+	}
+
+	XrAction wristAction;
+	if (have_HTC_vive_wrist_tracker_interaction)
+	{
+		size_t htc_wrist_paths = topLevelUserPaths.size();
+		topLevelUserPaths.resize(htc_wrist_paths + 2);
+		r = xrStringToPath(instance, "/user/wrist_htc/left", &topLevelUserPaths[htc_wrist_paths + 0]);
+		r = xrStringToPath(instance, "/user/wrist_htc/right", &topLevelUserPaths[htc_wrist_paths + 1]);
+
+		XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO, nullptr, "wrist_pose", XR_ACTION_TYPE_POSE_INPUT, 2, &topLevelUserPaths[htc_wrist_paths], "Wrist pose"};
+		r = xrCreateAction(actionSet, &actionInfo, &wristAction);
+		Log("%d(%s) xrCreateAction wrist pose %p\n", r, XrEnumStr(r), wristAction);
+
+		bindings[0].action = wristAction;
+		bindings[1].action = wristAction;
+		xrStringToPath(instance, "/user/wrist_htc/left/input/entity_htc", &bindings[0].binding);
+		xrStringToPath(instance, "/user/wrist_htc/right/input/entity_htc", &bindings[1].binding);
+		xrStringToPath(instance, "/user/wrist_htc/left/input/x", &(bindings[2].binding));
+		xrStringToPath(instance, "/user/wrist_htc/right/input/a", &(bindings[3].binding));
+		suggestedBindings.countSuggestedBindings = 4;
+		suggestBindings("/interaction_profiles/htc/vive_wrist_tracker");
 	}
 
 	//session
@@ -766,14 +823,9 @@ int main(int carc, const char** argv)
 		Log("%d(%s) xrCreateHandTrackerEXT right %p\n", r, XrEnumStr(r), handTrackers[1]);
 	}
 
-	interactionRenderModelsState irmState;
+	interactionRenderModelsState irmState{ instance, session, topLevelUserPaths };
 	if (have_EXT_interaction_render_model)
 	{
-		irmState.instance = instance;
-		irmState.session = session;
-		static_assert(sizeof(irmState.topLevelUserPaths) == sizeof(topLevelUserPaths), "topLevelUserPaths size");
-		memcpy(irmState.topLevelUserPaths, topLevelUserPaths, sizeof(topLevelUserPaths));
-
 		// before xrSyncActions enumerates 0
 		//	EnumerateInteractionRenderModels(irmState);
 	}
@@ -867,9 +919,10 @@ int main(int carc, const char** argv)
 		}
 	}
 
-	XrSpace handSpaces[6]{};
+	XrSpace handSpaces[8]{};
+	XrSpaceLocation spaceLocations[8]{};
 	uint32_t handSpacesCount = 2;
-	XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO, nullptr, handAction, handsPaths[0], {{0,0,0,1}, {0,0,0}} };
+	XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO, nullptr, gripAction, handsPaths[0], {{0,0,0,1}, {0,0,0}} };
 	r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 0);
 	CheckXrResult(r, "xrCreateActionSpace l");
 	actionSpaceInfo.subactionPath = handsPaths[1];
@@ -880,20 +933,32 @@ int main(int carc, const char** argv)
 	{
 		actionSpaceInfo.action = pinchAction;
 		actionSpaceInfo.subactionPath = handsPaths[0];
-		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 2);
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + handSpacesCount + 0);
 		CheckXrResult(r, "xrCreateActionSpace pinch l");
 		actionSpaceInfo.subactionPath = handsPaths[1];
-		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 3);
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + handSpacesCount + 1);
 		CheckXrResult(r, "xrCreateActionSpace pinch r");
 
 		actionSpaceInfo.action = pokeAction;
 		actionSpaceInfo.subactionPath = handsPaths[0];
-		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 4);
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + handSpacesCount + 2);
 		CheckXrResult(r, "xrCreateActionSpace poke l");
 		actionSpaceInfo.subactionPath = handsPaths[1];
-		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + 5);
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + handSpacesCount + 3);
 		CheckXrResult(r, "xrCreateActionSpace poke r");
 		handSpacesCount += 4;
+	}
+
+	if (have_xr11 || have_EXT_palm_pose)
+	{
+		actionSpaceInfo.action = palmAction;
+		actionSpaceInfo.subactionPath = handsPaths[0];
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + handSpacesCount + 0);
+		CheckXrResult(r, "xrCreateActionSpace palm l");
+		actionSpaceInfo.subactionPath = handsPaths[1];
+		r = xrCreateActionSpace(session, &actionSpaceInfo, handSpaces + handSpacesCount + 1);
+		CheckXrResult(r, "xrCreateActionSpace palm r");
+		handSpacesCount += 2;
 	}
 
 	XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO, nullptr, 1, &actionSet};
@@ -1124,8 +1189,8 @@ int main(int carc, const char** argv)
 					layerProjViews[i].subImage = { viewsData[i].swapchain,viewsData[i].rect, 0 };
 				}
 
-				XrSpaceLocation spaceLocations[6]{};
-				for (int i = 0; i < handSpacesCount; i++)
+				assert(std::size(spaceLocations) >= handSpacesCount);
+				for (uint32_t i = 0; i < handSpacesCount; i++)
 				{
 					spaceLocations[i] = { XR_TYPE_SPACE_LOCATION };
 					r = xrLocateSpace(handSpaces[i], localSpace, frameState.predictedDisplayTime, spaceLocations + i);
@@ -1225,20 +1290,20 @@ int main(int carc, const char** argv)
 							if (!hjLocs[hi].isActive)
 								continue;
 
-							for (int ji = 0; ji < hjLocs[hi].jointCount; ji++)
+							for (uint32_t ji = 0; ji < hjLocs[hi].jointCount; ji++)
 							{
 								auto &joint = hjLocs[hi].jointLocations[ji];
 
 								const glm::mat4 modelMtx = poseToMtx(joint.pose);
-								mvpMtx = vpMtx * glm::scale(modelMtx, glm::vec3(joint.radius));
+								mvpMtx = vpMtx * glm::scale(modelMtx, glm::vec3(joint.radius * 0.5f));
 								simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 								glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 							}
-							drawControllers = false;
+							//drawControllers = false;
 						}
 					}
 
-					for (int h = 0; h < handSpacesCount; h++)
+					for (uint32_t h = 0; h < handSpacesCount; h++)
 					{
 						if (!drawControllers)
 							break;
