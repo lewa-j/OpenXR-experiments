@@ -81,6 +81,10 @@ PFN_xrGetRenderModelPoseTopLevelUserPathEXT xrGetRenderModelPoseTopLevelUserPath
 PFN_xrCreateHandTrackerEXT xrCreateHandTrackerEXTd;
 PFN_xrDestroyHandTrackerEXT xrDestroyHandTrackerEXTd;
 PFN_xrLocateHandJointsEXT xrLocateHandJointsEXTd;
+//XR_FB_display_refresh_rate
+PFN_xrEnumerateDisplayRefreshRatesFB xrEnumerateDisplayRefreshRatesFBd;
+PFN_xrGetDisplayRefreshRateFB xrGetDisplayRefreshRateFBd;
+PFN_xrRequestDisplayRefreshRateFB xrRequestDisplayRefreshRateFBd;
 
 #define Log printf
 
@@ -379,6 +383,7 @@ int main(int carc, const char** argv)
 	bool have_HTC_vive_cosmos_controller_interaction = false;
 	bool have_HTC_vive_focus3_controller_interaction = false;
 	bool have_HTC_vive_wrist_tracker_interaction = false;
+	bool have_FB_display_refresh_rate = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -418,6 +423,8 @@ int main(int carc, const char** argv)
 			have_EXT_user_presence = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_local_floor"))
 			have_EXT_local_floor = true;
+		else if (!strcmp(exts[i].extensionName, "XR_FB_display_refresh_rate"))
+			have_FB_display_refresh_rate = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -449,6 +456,8 @@ int main(int carc, const char** argv)
 
 	if (have_EXT_user_presence)
 		enabledExts.push_back("XR_EXT_user_presence");
+	if (have_FB_display_refresh_rate)
+		enabledExts.push_back("XR_FB_display_refresh_rate");
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -529,6 +538,13 @@ int main(int carc, const char** argv)
 		r = xrGetInstanceProcAddr(instance, "xrCreateHandTrackerEXT", (PFN_xrVoidFunction*)&xrCreateHandTrackerEXTd);
 		r = xrGetInstanceProcAddr(instance, "xrDestroyHandTrackerEXT", (PFN_xrVoidFunction*)&xrDestroyHandTrackerEXTd);
 		r = xrGetInstanceProcAddr(instance, "xrLocateHandJointsEXT", (PFN_xrVoidFunction*)&xrLocateHandJointsEXTd);
+	}
+
+	if (have_FB_display_refresh_rate)
+	{
+		r = xrGetInstanceProcAddr(instance, "xrEnumerateDisplayRefreshRatesFB", (PFN_xrVoidFunction*)&xrEnumerateDisplayRefreshRatesFBd);
+		r = xrGetInstanceProcAddr(instance, "xrGetDisplayRefreshRateFB", (PFN_xrVoidFunction*)&xrGetDisplayRefreshRateFBd);
+		r = xrGetInstanceProcAddr(instance, "xrRequestDisplayRefreshRateFB", (PFN_xrVoidFunction*)&xrRequestDisplayRefreshRateFBd);
 	}
 
 	XrDebugUtilsMessengerEXT debugMessenger = XR_NULL_HANDLE;
@@ -847,6 +863,29 @@ int main(int carc, const char** argv)
 		//	EnumerateInteractionRenderModels(irmState);
 	}
 
+	if (have_FB_display_refresh_rate)
+	{
+		uint32_t count = 0;
+		r = xrEnumerateDisplayRefreshRatesFBd(session, 0, &count, nullptr);
+		Log("%d(%s) xrEnumerateDisplayRefreshRatesFB %d\n", r, XrEnumStr(r), count);
+		std::vector<float> refreshRates(count);
+		r = xrEnumerateDisplayRefreshRatesFBd(session, (uint32_t)refreshRates.size(), &count, refreshRates.data());
+		for (size_t i = 0; i < refreshRates.size(); i++)
+		{
+			Log(" %zu: %g\n", i, refreshRates[i]);
+		}
+
+		float currentRate = 0;
+		r = xrGetDisplayRefreshRateFBd(session, &currentRate);
+		Log("%d(%s) xrGetDisplayRefreshRateFB %g\n", r, XrEnumStr(r), currentRate);
+
+		if (refreshRates.size())
+		{
+			r = xrRequestDisplayRefreshRateFBd(session, refreshRates.back());
+			Log("%d(%s) xrRequestDisplayRefreshRateFB %g\n", r, XrEnumStr(r), refreshRates.back());
+		}
+	}
+
 	// spaces
 	uint32_t refSpacesCount = 0;
 	r = xrEnumerateReferenceSpaces(session, 0, &refSpacesCount, nullptr);
@@ -1116,6 +1155,12 @@ int main(int carc, const char** argv)
 				{
 					const XrEventDataUserPresenceChangedEXT &e = *(XrEventDataUserPresenceChangedEXT *)&event;
 					printf(" isUserPresent %d\n", e.isUserPresent);
+				}
+				break;
+				case XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB:
+				{
+					const XrEventDataDisplayRefreshRateChangedFB &e = *(XrEventDataDisplayRefreshRateChangedFB *)&event;
+					printf(" fromDisplayRefreshRate %g toDisplayRefreshRate %g", e.fromDisplayRefreshRate, e.toDisplayRefreshRate);
 				}
 				break;
 				}
