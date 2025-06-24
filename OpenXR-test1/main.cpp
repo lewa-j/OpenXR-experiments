@@ -371,6 +371,7 @@ int main(int carc, const char** argv)
 	bool have_EXT_hand_tracking_data_source = false;
 	bool have_EXT_hand_joints_motion_range = false;
 	bool have_EXT_user_presence = false;
+	bool have_EXT_local_floor = false;
 	bool have_EXT_palm_pose = false;
 	bool have_EXT_eye_gaze_interaction = false;
 	bool have_EXT_hand_interaction = false;
@@ -415,6 +416,8 @@ int main(int carc, const char** argv)
 			have_EXT_palm_pose = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_user_presence"))
 			have_EXT_user_presence = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_local_floor"))
+			have_EXT_local_floor = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -440,17 +443,10 @@ int main(int carc, const char** argv)
 		if (have_EXT_hand_joints_motion_range)
 			enabledExts.push_back("XR_EXT_hand_joints_motion_range");
 	}
-	if (have_EXT_hp_mixed_reality_controller)
-		enabledExts.push_back("XR_EXT_hp_mixed_reality_controller");
-	if (have_HTC_vive_cosmos_controller_interaction)
-		enabledExts.push_back("XR_HTC_vive_cosmos_controller_interaction");
-	if (have_HTC_vive_focus3_controller_interaction)
-		enabledExts.push_back("XR_HTC_vive_focus3_controller_interaction");
+
 	if (have_HTC_vive_wrist_tracker_interaction)
 		enabledExts.push_back("XR_HTC_vive_wrist_tracker_interaction");
 
-	if (have_EXT_palm_pose)
-		enabledExts.push_back("XR_EXT_palm_pose");
 	if (have_EXT_user_presence)
 		enabledExts.push_back("XR_EXT_user_presence");
 
@@ -472,13 +468,21 @@ int main(int carc, const char** argv)
 		have_xr11 = false;
 		instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_0;
 
+		if (have_EXT_hp_mixed_reality_controller)
+			enabledExts.push_back("XR_EXT_hp_mixed_reality_controller");
+		if (have_EXT_local_floor)
+			enabledExts.push_back("XR_EXT_local_floor");
+		if (have_EXT_palm_pose)
+			enabledExts.push_back("XR_EXT_palm_pose");
 		if (have_EXT_interaction_render_model && have_EXT_render_model && have_EXT_uuid)
-		{
 			enabledExts.push_back("XR_EXT_uuid");
+		if (have_HTC_vive_cosmos_controller_interaction)
+			enabledExts.push_back("XR_HTC_vive_cosmos_controller_interaction");
+		if (have_HTC_vive_focus3_controller_interaction)
+			enabledExts.push_back("XR_HTC_vive_focus3_controller_interaction");
 
-			instInfo.enabledExtensionCount = (uint32_t)enabledExts.size();
-			instInfo.enabledExtensionNames = enabledExts.data();
-		}
+		instInfo.enabledExtensionCount = (uint32_t)enabledExts.size();
+		instInfo.enabledExtensionNames = enabledExts.data();
 
 		r = xrCreateInstance(&instInfo, &instance);
 		Log("%d(%s) create instance 1.0 %p\n", r, XrEnumStr(r), instance);
@@ -862,9 +866,11 @@ int main(int carc, const char** argv)
 	XrSpace localSpace{};
 	XrReferenceSpaceCreateInfo refSpaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
 	refSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+	if (have_xr11 || have_EXT_local_floor)
+		refSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT;
 	refSpaceCreateInfo.poseInReferenceSpace = { {0,0,0,1},{0,0,0} };
 	r = xrCreateReferenceSpace(session, &refSpaceCreateInfo, &localSpace);
-	Log("%d(%s) xrCreateReferenceSpace local %p\n", r, XrEnumStr(r), localSpace);
+	Log("%d(%s) xrCreateReferenceSpace %s %p\n", r, XrEnumStr(r), XrEnumStr(refSpaceCreateInfo.referenceSpaceType), localSpace);
 
 	// swapchain
 
@@ -1043,16 +1049,16 @@ int main(int carc, const char** argv)
 				switch (event.type)
 				{
 				case XR_TYPE_EVENT_DATA_EVENTS_LOST:
-					printf("events lost count %d\n", ((XrEventDataEventsLost *)&event)->lostEventCount);
+					printf(" events lost count %d\n", ((XrEventDataEventsLost *)&event)->lostEventCount);
 					break;
 				case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
-					printf("instance loss pending. Time %lld\n", ((XrEventDataInstanceLossPending *)&event)->lossTime);
+					printf(" instance loss pending. Time %" PRId64 "\n", ((XrEventDataInstanceLossPending *)&event)->lossTime);
 					shouldClose = true;
 					break;
 				case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED:
 				{
 					XrEventDataSessionStateChanged *sessionStateChange = (XrEventDataSessionStateChanged *)&event;
-					printf("new session state %d(%s), time %lld\n", sessionStateChange->state, XrEnumStr(sessionStateChange->state), sessionStateChange->time);
+					printf(" new session state %d(%s), time %" PRId64 "\n", sessionStateChange->state, XrEnumStr(sessionStateChange->state), sessionStateChange->time);
 					sessionState = sessionStateChange->state;
 					if (sessionState == XR_SESSION_STATE_READY)
 					{
@@ -1091,6 +1097,14 @@ int main(int carc, const char** argv)
 					}
 				}
 				break;
+				case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
+				{
+					const XrEventDataReferenceSpaceChangePending &e = *(XrEventDataReferenceSpaceChangePending *)&event;
+					const auto &p = e.poseInPreviousSpace;
+					Log(" session %p spaceType %s time %" PRId64 " poseValid %d poseInPreviousSpace {{%g,%g,%g},{%g,%g,%g,%g}}\n",e.session,XrEnumStr(e.referenceSpaceType), e.changeTime, e.poseValid,
+						p.position.x, p.position.y, p.position.z, p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w);
+				}
+				break;
 				case XR_TYPE_EVENT_DATA_INTERACTION_RENDER_MODELS_CHANGED_EXT:
 				{
 					const XrEventDataInteractionRenderModelsChangedEXT &e = *(XrEventDataInteractionRenderModelsChangedEXT *)&event;
@@ -1101,7 +1115,7 @@ int main(int carc, const char** argv)
 				case XR_TYPE_EVENT_DATA_USER_PRESENCE_CHANGED_EXT:
 				{
 					const XrEventDataUserPresenceChangedEXT &e = *(XrEventDataUserPresenceChangedEXT *)&event;
-					printf("XrEventDataUserPresenceChangedEXT isUserPresent %d\n", e.isUserPresent);
+					printf(" isUserPresent %d\n", e.isUserPresent);
 				}
 				break;
 				}
@@ -1146,7 +1160,7 @@ int main(int carc, const char** argv)
 			XrFrameWaitInfo frameWaitInfo{XR_TYPE_FRAME_WAIT_INFO,nullptr};
 			XrFrameState frameState{ XR_TYPE_FRAME_STATE,nullptr };
 			r = xrWaitFrame(session, &frameWaitInfo, &frameState);
-			if (r) Log("%d(%s) wait frame: time %lld %lld render %d\n", r, XrEnumStr(r), frameState.predictedDisplayTime, frameState.predictedDisplayPeriod, frameState.shouldRender);
+			if (r) Log("%d(%s) wait frame: time %" PRId64 " %lld render %d\n", r, XrEnumStr(r), frameState.predictedDisplayTime, frameState.predictedDisplayPeriod, frameState.shouldRender);
 			if (r != XR_SUCCESS)
 				return r;
 			
@@ -1289,14 +1303,16 @@ int main(int carc, const char** argv)
 					glm::mat4 mvpMtx = vpMtx;
 
 					simpleShader.Use();
-					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 
 					//glLineWidth(8);
 
 					glBindVertexArray(cubeVAO);
+
+					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0, 0.5, 0)), glm::vec3(1,0.5,1));
+					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 					glDrawElements(GL_LINES,24,GL_UNSIGNED_SHORT,0);
 
-					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0.2, 0.0, -0.3)), glm::vec3(0.1f));
+					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0.2, 0.1, -0.3)), glm::vec3(0.1f));
 					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 					glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 
