@@ -316,7 +316,9 @@ int main(int carc, const char** argv)
 	//glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	//glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 	//glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-	GLFWwindow* window = glfwCreateWindow(800, 480, "OpenGL", nullptr, nullptr);
+	int windowWidth = 640;
+	int windowHeight = 480;
+	GLFWwindow* window = glfwCreateWindow(windowWidth, windowHeight, "OpenGL+OpenXR", nullptr, nullptr);
 	glfwMakeContextCurrent(window);
 
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
@@ -384,6 +386,7 @@ int main(int carc, const char** argv)
 	bool have_HTC_vive_focus3_controller_interaction = false;
 	bool have_HTC_vive_wrist_tracker_interaction = false;
 	bool have_FB_display_refresh_rate = false;
+	bool have_MND_headless = false;
 
 	for (int i = 0; i < exts.size(); i++)
 	{
@@ -425,6 +428,8 @@ int main(int carc, const char** argv)
 			have_EXT_local_floor = true;
 		else if (!strcmp(exts[i].extensionName, "XR_FB_display_refresh_rate"))
 			have_FB_display_refresh_rate = true;
+		else if (!strcmp(exts[i].extensionName, "XR_MND_headless"))
+			have_MND_headless = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -458,6 +463,8 @@ int main(int carc, const char** argv)
 		enabledExts.push_back("XR_EXT_user_presence");
 	if (have_FB_display_refresh_rate)
 		enabledExts.push_back("XR_FB_display_refresh_rate");
+	if (have_MND_headless)
+		enabledExts.push_back("XR_MND_headless");
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -613,6 +620,13 @@ int main(int carc, const char** argv)
 	if (have_EXT_user_presence)
 		Log(" supportsUserPresence: %d\n", supProps.supportsUserPresence);
 
+	//TODO parameter
+	bool headless = false;
+	if (!have_MND_headless)
+		headless = false;
+	bool forceHandTrackingUnobstructed = false;
+	XrHandJointsMotionRangeEXT handMotionRange = XR_HAND_JOINTS_MOTION_RANGE_UNOBSTRUCTED_EXT;//XR_HAND_JOINTS_MOTION_RANGE_CONFORMING_TO_CONTROLLER_EXT
+
 	XrViewConfigurationType viewConfigType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 
 	uint32_t viewConfigCount = 0;
@@ -630,9 +644,12 @@ int main(int carc, const char** argv)
 
 	uint32_t cfgViewCount = 0;
 	std::vector<XrViewConfigurationView> cfgViews;
-	r = xrEnumerateViewConfigurationViews(instance, systemId, viewConfigType, 0, &cfgViewCount, nullptr);
-	Log("%d(%s) view cfg views %d\n", r, XrEnumStr(r), cfgViewCount);
-	if (viewConfigCount)
+	if (!headless)
+	{
+		r = xrEnumerateViewConfigurationViews(instance, systemId, viewConfigType, 0, &cfgViewCount, nullptr);
+		Log("%d(%s) view cfg views %d\n", r, XrEnumStr(r), cfgViewCount);
+	}
+	if (cfgViewCount)
 	{
 		cfgViews.resize(cfgViewCount, { XR_TYPE_VIEW_CONFIGURATION_VIEW, nullptr });
 		r = xrEnumerateViewConfigurationViews(instance, systemId, viewConfigType, (uint32_t)cfgViews.size(), &cfgViewCount, cfgViews.data());
@@ -649,8 +666,11 @@ int main(int carc, const char** argv)
 	}
 
 	uint32_t envBlendModesCount = 0;
-	r = xrEnumerateEnvironmentBlendModes(instance, systemId, viewConfigType, 0, &envBlendModesCount, nullptr);
-	Log("%d(%s) Environment Blend Modes %d\n", r, XrEnumStr(r), envBlendModesCount);
+	if (!headless)
+	{
+		r = xrEnumerateEnvironmentBlendModes(instance, systemId, viewConfigType, 0, &envBlendModesCount, nullptr);
+		Log("%d(%s) Environment Blend Modes %d\n", r, XrEnumStr(r), envBlendModesCount);
+	}
 	if (envBlendModesCount)
 	{
 		std::vector<XrEnvironmentBlendMode> blendModes(envBlendModesCount);
@@ -818,14 +838,19 @@ int main(int carc, const char** argv)
 	}
 
 	//session
-
-	XrGraphicsRequirementsOpenGLKHR glReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR };
-	r = xrGetOpenGLGraphicsRequirementsKHRd(instance, systemId, &glReqs);
-	Log("OpenGL %d.%d - %d.%d required\n", XR_VERSION_MAJOR(glReqs.minApiVersionSupported), XR_VERSION_MINOR(glReqs.minApiVersionSupported), XR_VERSION_MAJOR(glReqs.maxApiVersionSupported), XR_VERSION_MINOR(glReqs.maxApiVersionSupported));
+	if (!headless)
+	{
+		XrGraphicsRequirementsOpenGLKHR glReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_KHR };
+		r = xrGetOpenGLGraphicsRequirementsKHRd(instance, systemId, &glReqs);
+		Log("OpenGL %d.%d - %d.%d required\n", XR_VERSION_MAJOR(glReqs.minApiVersionSupported), XR_VERSION_MINOR(glReqs.minApiVersionSupported), XR_VERSION_MAJOR(glReqs.maxApiVersionSupported), XR_VERSION_MINOR(glReqs.maxApiVersionSupported));
+	}
 
 	XrSession session = XR_NULL_HANDLE;
 	XrGraphicsBindingOpenGLWin32KHR glWin32Binding{ XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR, nullptr, dc, glrc };
-	XrSessionCreateInfo sessionInfo{ XR_TYPE_SESSION_CREATE_INFO, &glWin32Binding, 0, systemId };
+	XrSessionCreateInfo sessionInfo{ XR_TYPE_SESSION_CREATE_INFO, nullptr, 0, systemId };
+	if (!headless)
+		sessionInfo.next = &glWin32Binding;
+
 	r = xrCreateSession(instance, &sessionInfo, &session);
 	if (XR_FAILED(r))
 	{
@@ -834,8 +859,6 @@ int main(int carc, const char** argv)
 		return -1;
 	}
 	Log("%d(%s) session %p\n", r, XrEnumStr(r), session);
-
-	bool forceHandTrackingUnobstructed = false;
 
 	XrHandTrackerEXT handTrackers[2]{ XR_NULL_HANDLE, XR_NULL_HANDLE };
 	if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
@@ -914,9 +937,12 @@ int main(int carc, const char** argv)
 	// swapchain
 
 	uint32_t formatsCount = 0;
-	r = xrEnumerateSwapchainFormats(session, 0, &formatsCount, nullptr);
-	Log("%d(%s) swapchain formats: %d\n", r, XrEnumStr(r), formatsCount);
 	int64_t swapchainFormat = 0;
+	if (!headless)
+	{
+		r = xrEnumerateSwapchainFormats(session, 0, &formatsCount, nullptr);
+		Log("%d(%s) swapchain formats: %d\n", r, XrEnumStr(r), formatsCount);
+	}
 	if (formatsCount)
 	{
 		std::vector<int64_t>swapchainFormats(formatsCount);
@@ -956,7 +982,7 @@ int main(int carc, const char** argv)
 		r = xrCreateSwapchain(session, &scInfo, &viewsData[i].swapchain);
 		if (XR_FAILED(r))
 		{
-			printf("xrCreateSwapchain %d failed %s\n", i, XrEnumStr(r));
+			Log("xrCreateSwapchain %d failed %s\n", i, XrEnumStr(r));
 			xrDestroySession(session);
 			xrDestroyInstance(instance);
 			return -1;
@@ -1072,8 +1098,6 @@ int main(int carc, const char** argv)
 	bool firstTime = true;
 	bool firstTimeFocused = true;
 
-	XrHandJointsMotionRangeEXT handMotionRange = XR_HAND_JOINTS_MOTION_RANGE_CONFORMING_TO_CONTROLLER_EXT;//XR_HAND_JOINTS_MOTION_RANGE_UNOBSTRUCTED_EXT
-
 	//loop
 	bool shouldClose = false;
 	while (!shouldClose)
@@ -1101,7 +1125,7 @@ int main(int carc, const char** argv)
 					sessionState = sessionStateChange->state;
 					if (sessionState == XR_SESSION_STATE_READY)
 					{
-						XrSessionBeginInfo sessionBeginInfo{ XR_TYPE_SESSION_BEGIN_INFO,nullptr,viewConfigType };
+						XrSessionBeginInfo sessionBeginInfo{ XR_TYPE_SESSION_BEGIN_INFO, nullptr, viewConfigType };
 						XrResult sr = xrBeginSession(session, &sessionBeginInfo);
 						if (XR_FAILED(sr))
 						{
@@ -1222,7 +1246,7 @@ int main(int carc, const char** argv)
 
 			if (firstTime || (firstTimeFocused && sessionState == XR_SESSION_STATE_FOCUSED))
 			{
-				if (have_EXT_interaction_render_model)
+				if (!headless && have_EXT_interaction_render_model)
 				{
 					EnumerateInteractionRenderModels(irmState);
 				}
@@ -1231,42 +1255,11 @@ int main(int carc, const char** argv)
 					firstTimeFocused = false;
 			}
 
-			if (frameState.shouldRender)
+			XrHandJointLocationEXT handJoints[2][XR_HAND_JOINT_COUNT_EXT];
+			XrHandJointLocationsEXT hjLocs[2]{};
+			XrHandTrackingDataSourceStateEXT htdsState[2]{};
+			if (sessionState == XR_SESSION_STATE_VISIBLE || sessionState == XR_SESSION_STATE_FOCUSED)
 			{
-				frameLayers.clear();
-
-				for (int i = 0; i < viewsData.size(); i++)
-				{
-					XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
-					XrResult ar = xrAcquireSwapchainImage(viewsData[i].swapchain, &acquireInfo, &swapchainsImgIndex[i]);
-					if (XR_FAILED(ar))
-					{
-						printf("xrAcquireSwapchainImage %d failed %s\n", i, XrEnumStr(r));
-						return r;
-					}
-					/*else {
-						printf("Swapchain image acquired: %d\n", swapchainImgIndex);
-					}*/
-
-					XrSwapchainImageWaitInfo imageWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO, nullptr, 100000000 };//100ms
-					r = xrWaitSwapchainImage(viewsData[i].swapchain, &imageWaitInfo);
-					if (r) Log("%d(%s) wait image\n", r, XrEnumStr(r));
-					if (r != XR_SUCCESS)
-						return r;
-				}
-
-				XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO,nullptr,viewConfigType,frameState.predictedDisplayTime, localSpace };
-				XrViewState viewState{ XR_TYPE_VIEW_STATE };
-				uint32_t viewCount = 0;
-				r = xrLocateViews(session, &viewLocateInfo, &viewState, (uint32_t)views.size(), &viewCount, views.data());
-				if (r) Log("%d(%s) locate views: flags %" PRIX64 ". views %d\n", r, XrEnumStr(r), viewState.viewStateFlags, count);
-
-				for (size_t i = 0; i < views.size(); i++)
-				{
-					layerProjViews[i] = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW, nullptr, views[i].pose, views[i].fov };
-					layerProjViews[i].subImage = { viewsData[i].swapchain,viewsData[i].rect, 0 };
-				}
-
 				assert(std::size(spaceLocations) >= handSpacesCount);
 				for (uint32_t i = 0; i < handSpacesCount; i++)
 				{
@@ -1275,9 +1268,6 @@ int main(int carc, const char** argv)
 					if (r) Log("%d(%s) xrLocateSpace hand %d\n", r, XrEnumStr(r), i);
 				}
 
-				XrHandJointLocationEXT handJoints[2][XR_HAND_JOINT_COUNT_EXT];
-				XrHandJointLocationsEXT hjLocs[2]{};
-				XrHandTrackingDataSourceStateEXT htdsState[2]{};
 				if (have_EXT_hand_tracking && shtProps.supportsHandTracking)
 				{
 					for (size_t hi = 0; hi < std::size(handTrackers); hi++)
@@ -1310,52 +1300,24 @@ int main(int carc, const char** argv)
 						}
 					}
 				}
+			}
 
-				for (size_t i = 0; i < irmState.renderModels.size(); i++)
+			auto renderView = [&](const glm::mat4 &vpMtx)
 				{
-					auto &m = irmState.renderModels[i];
-					auto &s = m.location;
-					s = { XR_TYPE_SPACE_LOCATION };
-					r = xrLocateSpace(m.space, localSpace, frameState.predictedDisplayTime, &s);
-					if (r) Log("%d(%s) xrLocateSpace irm %zu\n", r, XrEnumStr(r), i);
-
-					if (s.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT
-						&& s.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT)
-					{
-						XrRenderModelStateGetInfoEXT getInfo{ XR_TYPE_RENDER_MODEL_STATE_GET_INFO_EXT, nullptr, frameState.predictedDisplayTime };
-						XrRenderModelStateEXT rmState{ XR_TYPE_RENDER_MODEL_STATE_EXT, nullptr, (uint32_t)m.nodesState.size(), m.nodesState.data() };
-						r = xrGetRenderModelStateEXTd(m.renderModel, &getInfo, &rmState);
-						if (r) Log("%d(%s) xrGetRenderModelStateEXT irm %zu\n", r, XrEnumStr(r), i);
-					}
-				}
-
-				//RENDER!!!
-				for (int i = 0; i < views.size(); i++)
-				{
-					glBindFramebuffer(GL_FRAMEBUFFER, viewsData[i].fbo);
-					glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, viewsData[i].images[swapchainsImgIndex[i]].image, 0);
-					glViewport(viewsData[i].rect.offset.x, viewsData[i].rect.offset.y, viewsData[i].rect.extent.width, viewsData[i].rect.extent.height);
-
-					//int i = 0;
-					//glBindFramebuffer(GL_FRAMEBUFFER, 0);
-					//glViewport(0,0,800,480);
-
 					glClearColor(0.3f, 0.4f, 0.6f, 1.0f);
 					glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-					glm::mat4 vpMtx = FrustumXR(views[i].fov, 0.01f, 1000.0f) * glm::inverse(poseToMtx(views[i].pose));
-
-					glm::mat4 mvpMtx = vpMtx;
+					glBindVertexArray(cubeVAO);
 
 					simpleShader.Use();
 
 					//glLineWidth(8);
 
-					glBindVertexArray(cubeVAO);
+					glm::mat4 mvpMtx = vpMtx;
 
-					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0, 0.5, 0)), glm::vec3(1,0.5,1));
+					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0, 0.5, 0)), glm::vec3(1, 0.5, 1));
 					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
-					glDrawElements(GL_LINES,24,GL_UNSIGNED_SHORT,0);
+					glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 
 					mvpMtx = vpMtx * glm::scale(glm::translate(glm::mat4(1), glm::vec3(0.2, 0.1, -0.3)), glm::vec3(0.1f));
 					simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
@@ -1389,7 +1351,7 @@ int main(int carc, const char** argv)
 							break;
 						if (spaceLocations[h].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)
 						{
-							mvpMtx = vpMtx * glm::scale(poseToMtx(spaceLocations[h].pose), glm::vec3(0.05f, 0.05f,0.06f));
+							mvpMtx = vpMtx * glm::scale(poseToMtx(spaceLocations[h].pose), glm::vec3(0.05f, 0.05f, 0.06f));
 							simpleShader.UniformMat4(simpleShader.u_mvpMtx, &mvpMtx[0].x);
 							glDrawElements(GL_LINES, 24, GL_UNSIGNED_SHORT, 0);
 						}
@@ -1436,11 +1398,73 @@ int main(int carc, const char** argv)
 							}
 						}
 					}
+				};
 
-					//glfwSwapBuffers(window);
+			if (frameState.shouldRender)
+			{
+				frameLayers.clear();
+
+				for (int i = 0; i < viewsData.size(); i++)
+				{
+					XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+					XrResult ar = xrAcquireSwapchainImage(viewsData[i].swapchain, &acquireInfo, &swapchainsImgIndex[i]);
+					if (XR_FAILED(ar))
+					{
+						printf("xrAcquireSwapchainImage %d failed %s\n", i, XrEnumStr(r));
+						return r;
+					}
+					/*else {
+						printf("Swapchain image acquired: %d\n", swapchainImgIndex);
+					}*/
+
+					XrSwapchainImageWaitInfo imageWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO, nullptr, 100000000 };//100ms
+					r = xrWaitSwapchainImage(viewsData[i].swapchain, &imageWaitInfo);
+					if (r) Log("%d(%s) wait image\n", r, XrEnumStr(r));
+					if (r != XR_SUCCESS)
+						return r;
+				}
+
+				XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO,nullptr,viewConfigType,frameState.predictedDisplayTime, localSpace };
+				XrViewState viewState{ XR_TYPE_VIEW_STATE };
+				uint32_t viewCount = 0;
+				r = xrLocateViews(session, &viewLocateInfo, &viewState, (uint32_t)views.size(), &viewCount, views.data());
+				if (r) Log("%d(%s) locate views: flags %" PRIX64 ". views %d\n", r, XrEnumStr(r), viewState.viewStateFlags, count);
+
+				for (size_t i = 0; i < views.size(); i++)
+				{
+					layerProjViews[i] = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW, nullptr, views[i].pose, views[i].fov };
+					layerProjViews[i].subImage = { viewsData[i].swapchain,viewsData[i].rect, 0 };
+				}
+
+				for (size_t i = 0; i < irmState.renderModels.size(); i++)
+				{
+					auto &m = irmState.renderModels[i];
+					auto &s = m.location;
+					s = { XR_TYPE_SPACE_LOCATION };
+					r = xrLocateSpace(m.space, localSpace, frameState.predictedDisplayTime, &s);
+					if (r) Log("%d(%s) xrLocateSpace irm %zu\n", r, XrEnumStr(r), i);
+
+					if (s.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT
+						&& s.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT)
+					{
+						XrRenderModelStateGetInfoEXT getInfo{ XR_TYPE_RENDER_MODEL_STATE_GET_INFO_EXT, nullptr, frameState.predictedDisplayTime };
+						XrRenderModelStateEXT rmState{ XR_TYPE_RENDER_MODEL_STATE_EXT, nullptr, (uint32_t)m.nodesState.size(), m.nodesState.data() };
+						r = xrGetRenderModelStateEXTd(m.renderModel, &getInfo, &rmState);
+						if (r) Log("%d(%s) xrGetRenderModelStateEXT irm %zu\n", r, XrEnumStr(r), i);
+					}
+				}
+
+				//RENDER!!!
+				for (int i = 0; i < views.size(); i++)
+				{
+					glBindFramebuffer(GL_FRAMEBUFFER, viewsData[i].fbo);
+					glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, viewsData[i].images[swapchainsImgIndex[i]].image, 0);
+					glViewport(viewsData[i].rect.offset.x, viewsData[i].rect.offset.y, viewsData[i].rect.extent.width, viewsData[i].rect.extent.height);
+
+					glm::mat4 vpMtx = FrustumXR(views[i].fov, 0.01f, 1000.0f) * glm::inverse(poseToMtx(views[i].pose));
+					renderView(vpMtx);
 				}
 				glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
 
 				XrSwapchainImageReleaseInfo imageReleaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO, nullptr };
 				for (int i = 0; i < cfgViews.size(); i++)
@@ -1454,12 +1478,22 @@ int main(int carc, const char** argv)
 
 				renderedFrames++;
 			}
+			else
+			{
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+				glViewport(0,0,windowWidth,windowHeight);
+				glm::mat4 vpMtx = glm::perspective(glm::radians(85.f), windowWidth / (float)windowHeight, 0.1f, 1000.0f) * glm::translate(glm::mat4(1), -glm::vec3(0, 0.5, 1.5));
+				renderView(vpMtx);
+			}
 
 			XrFrameEndInfo frameEndInfo{ XR_TYPE_FRAME_END_INFO, nullptr, frameState.predictedDisplayTime, XR_ENVIRONMENT_BLEND_MODE_OPAQUE, (uint32_t)frameLayers.size(), frameLayers.data() };
 			r = xrEndFrame(session, &frameEndInfo);
 			if (r) Log("%d(%s) end frame\n", r, XrEnumStr(r));
 			if (r != XR_SUCCESS)
 				return r;
+
+			if (headless)
+				glfwSwapBuffers(window);
 		}
 	}
 
