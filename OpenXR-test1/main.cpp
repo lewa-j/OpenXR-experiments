@@ -370,6 +370,7 @@ int main(int carc, const char** argv)
 	bool have_EXT_hand_tracking = false;
 	bool have_EXT_hand_tracking_data_source = false;
 	bool have_EXT_hand_joints_motion_range = false;
+	bool have_EXT_user_presence = false;
 	bool have_EXT_palm_pose = false;
 	bool have_EXT_eye_gaze_interaction = false;
 	bool have_EXT_hand_interaction = false;
@@ -412,6 +413,8 @@ int main(int carc, const char** argv)
 			have_HTC_vive_wrist_tracker_interaction = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_palm_pose"))
 			have_EXT_palm_pose = true;
+		else if (!strcmp(exts[i].extensionName, "XR_EXT_user_presence"))
+			have_EXT_user_presence = true;
 	}
 
 	if (have_EXT_debug_utils)
@@ -448,6 +451,8 @@ int main(int carc, const char** argv)
 
 	if (have_EXT_palm_pose)
 		enabledExts.push_back("XR_EXT_palm_pose");
+	if (have_EXT_user_presence)
+		enabledExts.push_back("XR_EXT_user_presence");
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrInstanceCreateInfo instInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -557,6 +562,7 @@ int main(int carc, const char** argv)
 	void **ppNext = &sysProps.next;
 	XrSystemEyeGazeInteractionPropertiesEXT segiProps{ XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT };
 	XrSystemHandTrackingPropertiesEXT shtProps{ XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT };
+	XrSystemUserPresencePropertiesEXT supProps{ XR_TYPE_SYSTEM_USER_PRESENCE_PROPERTIES_EXT };
 	if (have_EXT_eye_gaze_interaction)
 	{
 		*ppNext = &segiProps;
@@ -566,6 +572,11 @@ int main(int carc, const char** argv)
 	{
 		*ppNext = &shtProps;
 		ppNext = &shtProps.next;
+	}
+	if (have_EXT_user_presence)
+	{
+		*ppNext = &supProps;
+		ppNext = &supProps.next;
 	}
 
 	r = xrGetSystemProperties(instance, systemId, &sysProps);
@@ -579,6 +590,8 @@ int main(int carc, const char** argv)
 		Log(" supportsEyeGazeInteraction: %d\n", segiProps.supportsEyeGazeInteraction);
 	if (have_EXT_hand_tracking)
 		Log(" supportsHandTracking: %d\n", shtProps.supportsHandTracking);
+	if (have_EXT_user_presence)
+		Log(" supportsUserPresence: %d\n", supProps.supportsUserPresence);
 
 	XrViewConfigurationType viewConfigType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 
@@ -1083,6 +1096,12 @@ int main(int carc, const char** argv)
 					const XrEventDataInteractionRenderModelsChangedEXT &e = *(XrEventDataInteractionRenderModelsChangedEXT *)&event;
 					if (have_EXT_interaction_render_model)
 						EnumerateInteractionRenderModels(irmState);
+				}
+				break;
+				case XR_TYPE_EVENT_DATA_USER_PRESENCE_CHANGED_EXT:
+				{
+					const XrEventDataUserPresenceChangedEXT &e = *(XrEventDataUserPresenceChangedEXT *)&event;
+					printf("XrEventDataUserPresenceChangedEXT isUserPresent %d\n", e.isUserPresent);
 				}
 				break;
 				}
