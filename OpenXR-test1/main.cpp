@@ -385,6 +385,7 @@ int main(int carc, const char** argv)
 	bool have_HTC_vive_cosmos_controller_interaction = false;
 	bool have_HTC_vive_focus3_controller_interaction = false;
 	bool have_HTC_vive_wrist_tracker_interaction = false;
+	bool have_BD_controller_interaction = false;
 	bool have_FB_display_refresh_rate = false;
 	bool have_MND_headless = false;
 
@@ -396,6 +397,7 @@ int main(int carc, const char** argv)
 			have_EXT_debug_utils = true;
 		else if (!strcmp(exts[i].extensionName, "XR_KHR_opengl_enable"))
 			have_KHR_opengl_enable = true;
+#if 1
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_uuid"))
 			have_EXT_uuid = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_render_model"))
@@ -420,6 +422,8 @@ int main(int carc, const char** argv)
 			have_HTC_vive_focus3_controller_interaction = true;
 		else if (!strcmp(exts[i].extensionName, "XR_HTC_vive_wrist_tracker_interaction"))
 			have_HTC_vive_wrist_tracker_interaction = true;
+		else if (!strcmp(exts[i].extensionName, "XR_BD_controller_interaction"))
+			have_BD_controller_interaction = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_palm_pose"))
 			have_EXT_palm_pose = true;
 		else if (!strcmp(exts[i].extensionName, "XR_EXT_user_presence"))
@@ -430,6 +434,7 @@ int main(int carc, const char** argv)
 			have_FB_display_refresh_rate = true;
 		else if (!strcmp(exts[i].extensionName, "XR_MND_headless"))
 			have_MND_headless = true;
+#endif
 	}
 
 	if (have_EXT_debug_utils)
@@ -458,6 +463,8 @@ int main(int carc, const char** argv)
 
 	if (have_HTC_vive_wrist_tracker_interaction)
 		enabledExts.push_back("XR_HTC_vive_wrist_tracker_interaction");
+	if (have_BD_controller_interaction)
+		enabledExts.push_back("XR_BD_controller_interaction");
 
 	if (have_EXT_user_presence)
 		enabledExts.push_back("XR_EXT_user_presence");
@@ -476,10 +483,10 @@ int main(int carc, const char** argv)
 	instInfo.enabledExtensionNames = enabledExts.data();
 
 	instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_1;
-	r = xrCreateInstance(&instInfo, &instance);
-	Log("%d(%s) create instance 1.1 %p\n", r, XrEnumStr(r), instance);
+	//r = xrCreateInstance(&instInfo, &instance);
+	//Log("%d(%s) create instance 1.1 %p\n", r, XrEnumStr(r), instance);
 	bool have_xr11 = true;
-	if (r == XR_ERROR_API_VERSION_UNSUPPORTED)
+	//if (r == XR_ERROR_API_VERSION_UNSUPPORTED)
 	{
 		have_xr11 = false;
 		instInfo.applicationInfo.apiVersion = XR_API_VERSION_1_0;
@@ -787,11 +794,12 @@ int main(int carc, const char** argv)
 	if (have_xr11 || have_EXT_hp_mixed_reality_controller)
 		suggestBindings("/interaction_profiles/hp/mixed_reality_controller");
 
-	//if (have_xr11)
+	//if (have_xr11 || have_BD_controller_interaction)
 	{
 		// 1.1 standard
 		suggestBindings("/interaction_profiles/bytedance/pico_neo3_controller");
 		suggestBindings("/interaction_profiles/bytedance/pico4_controller");
+		suggestBindings("/interaction_profiles/bytedance/pico_g3_controller");
 	}
 
 	// non standart
